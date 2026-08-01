@@ -1,7 +1,12 @@
-import { join } from "path";
+import { join, dirname } from "path";
+import { existsSync, mkdirSync } from "fs";
 import { type AntigravityAccount, type SelectionStrategy } from "./types";
 
-const ACCOUNTS_FILE = process.env.ACCOUNTS_FILE || join(process.cwd(), "antigravity-accounts.json");
+const defaultPath = existsSync(join(process.cwd(), "data"))
+  ? join(process.cwd(), "data", "antigravity-accounts.json")
+  : join(process.cwd(), "antigravity-accounts.json");
+
+const ACCOUNTS_FILE = process.env.ACCOUNTS_FILE || defaultPath;
 
 interface StorageFormat {
     accounts: AntigravityAccount[];
@@ -32,6 +37,10 @@ export async function loadAccounts(): Promise<AntigravityAccount[]> {
 
 export async function saveConfig(config: StorageFormat): Promise<void> {
   try {
+    const dir = dirname(ACCOUNTS_FILE);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
     await Bun.write(ACCOUNTS_FILE, JSON.stringify(config, null, 2));
   } catch (e) {
     console.error("Failed to save accounts:", e);
