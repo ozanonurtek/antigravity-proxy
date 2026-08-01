@@ -1,7 +1,13 @@
+import { join, dirname } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { type ProxyConfig } from './types';
 import { EventEmitter } from 'node:events';
 
-const CONFIG_PATH = 'config.json';
+const defaultPath = existsSync(join(process.cwd(), 'data'))
+  ? join(process.cwd(), 'data', 'config.json')
+  : (existsSync(join(process.cwd(), 'config.json')) ? join(process.cwd(), 'config.json') : join(process.cwd(), 'data', 'config.json'));
+
+const CONFIG_PATH = process.env.CONFIG_FILE || process.env.CONFIG_PATH || defaultPath;
 export const configEventBus = new EventEmitter();
 
 let config: ProxyConfig;
@@ -147,12 +153,16 @@ function applyEnvOverrides(cfg: ProxyConfig): ProxyConfig {
 
 export async function saveProxyConfig(newConfig: ProxyConfig): Promise<void> {
   try {
+    const dir = dirname(CONFIG_PATH);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
     await Bun.write(CONFIG_PATH, JSON.stringify(newConfig, null, 2));
     config = newConfig;
     configEventBus.emit('update', config);
-    console.log('[Config] Configuration saved successfully');
+    console.log(`[Config] Configuration saved successfully to ${CONFIG_PATH}`);
   } catch (e) {
-    console.error('[Config] Failed to save config.json:', e);
+    console.error(`[Config] Failed to save config to ${CONFIG_PATH}:`, e);
     throw e;
   }
 }
