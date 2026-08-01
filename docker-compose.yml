@@ -1,12 +1,15 @@
 services:
   proxy:
     build: .
+    container_name: antigravity-proxy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
     environment:
       - ACCOUNTS_FILE=/app/data/antigravity-accounts.json
       - CONFIG_FILE=/app/data/config.json
-      - BASE_URL=http://127.0.0.1:3000
+      - BASE_URL=${BASE_URL:-http://127.0.0.1:3000}
     volumes:
       - ./data:/app/data:z
     restart: unless-stopped
