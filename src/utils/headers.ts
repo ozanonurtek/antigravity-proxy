@@ -12,8 +12,12 @@ export function getBaseUrl(): string {
 }
 
 export const OAUTH_CONFIG = {
-  clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-  clientSecret: "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",
+  get clientId() {
+    return process.env.GOOGLE_CLIENT_ID || process.env.OAUTH_CLIENT_ID || "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+  },
+  get clientSecret() {
+    return process.env.GOOGLE_CLIENT_SECRET || process.env.OAUTH_CLIENT_SECRET || "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";
+  },
   authUri: "https://accounts.google.com/o/oauth2/v2/auth",
   tokenUri: "https://oauth2.googleapis.com/token",
   scopes: [
@@ -24,7 +28,14 @@ export const OAUTH_CONFIG = {
     "https://www.googleapis.com/auth/experimentsandconfigs"
   ],
   get redirectUri() {
-    return `${getBaseUrl()}/oauth-callback`;
+    if (process.env.GOOGLE_CLIENT_ID || process.env.OAUTH_CLIENT_ID) {
+      return `${getBaseUrl()}/oauth-callback`;
+    }
+    const baseUrl = getBaseUrl();
+    if (baseUrl.includes("127.0.0.1")) {
+      return "http://127.0.0.1:3000/oauth-callback";
+    }
+    return "http://localhost:3000/oauth-callback";
   }
 };
 
