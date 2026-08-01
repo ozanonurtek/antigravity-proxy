@@ -1,0 +1,39 @@
+import { expect, test, describe, beforeEach, afterEach } from "bun:test";
+import { getBaseUrl, OAUTH_CONFIG } from "../../src/utils/headers";
+
+describe("Base URL & OAuth Config Unit Tests", () => {
+  const originalBaseUrl = process.env.BASE_URL;
+
+  afterEach(() => {
+    if (originalBaseUrl !== undefined) {
+      process.env.BASE_URL = originalBaseUrl;
+    } else {
+      delete process.env.BASE_URL;
+    }
+  });
+
+  test("getBaseUrl defaults to http://localhost:3000 when BASE_URL is empty", () => {
+    delete process.env.BASE_URL;
+    expect(getBaseUrl()).toBe("http://localhost:3000");
+  });
+
+  test("getBaseUrl uses process.env.BASE_URL when provided", () => {
+    process.env.BASE_URL = "http://192.168.1.100:3000";
+    expect(getBaseUrl()).toBe("http://192.168.1.100:3000");
+  });
+
+  test("getBaseUrl strips trailing slashes from process.env.BASE_URL", () => {
+    process.env.BASE_URL = "https://proxy.example.com///";
+    expect(getBaseUrl()).toBe("https://proxy.example.com");
+  });
+
+  test("getBaseUrl prepends http:// if scheme is missing", () => {
+    process.env.BASE_URL = "my-host:3000";
+    expect(getBaseUrl()).toBe("http://my-host:3000");
+  });
+
+  test("OAUTH_CONFIG.redirectUri dynamically reflects process.env.BASE_URL", () => {
+    process.env.BASE_URL = "https://custom.domain.com:8443";
+    expect(OAUTH_CONFIG.redirectUri).toBe("https://custom.domain.com:8443/oauth-callback");
+  });
+});

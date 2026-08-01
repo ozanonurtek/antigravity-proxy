@@ -1,5 +1,16 @@
 import { type DeviceFingerprint } from "../auth/types";
 
+export function getBaseUrl(): string {
+  let baseUrl = (process.env.BASE_URL || "http://localhost:3000").trim().replace(/\/+$/, "");
+  if (!baseUrl) {
+    baseUrl = "http://localhost:3000";
+  }
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    baseUrl = `http://${baseUrl}`;
+  }
+  return baseUrl;
+}
+
 export const OAUTH_CONFIG = {
   clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
   clientSecret: "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",
@@ -12,7 +23,9 @@ export const OAUTH_CONFIG = {
     "https://www.googleapis.com/auth/cclog",
     "https://www.googleapis.com/auth/experimentsandconfigs"
   ],
-  redirectUri: "http://localhost:3000/oauth-callback"
+  get redirectUri() {
+    return `${getBaseUrl()}/oauth-callback`;
+  }
 };
 
 const ANTIGRAVITY_VERSION = "2.0.1";

@@ -10,7 +10,7 @@ import { initManager, getBestAccount, updateAccountUsage, addAccount, getAccount
 import { type SelectionStrategy, type AntigravityAccount } from "./auth/types";
 import { generateAuthUrl, exchangeCode, getUserEmail, getProjectId } from "./auth/oauth";
 import { transformToGoogleBody, transformGoogleEventToOpenAI, createOpenAIStreamTransformer, getOriginalToolName } from "./utils/transform";
-import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint } from "./utils/headers";
+import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint, getBaseUrl } from "./utils/headers";
 import { refreshAllQuotas, fetchQuota, supportedModelsCache } from "./api/quota";
 import { parseGoogleError } from "./utils/errors";
 import { isApiAuthorized, isWebAuthenticated, isWebAuthRequired, createWebSession, destroyWebSession } from "./auth/security";
@@ -774,7 +774,7 @@ Bun.serve({
 
           await addAccount(newAccount);
           
-          return Response.redirect(`http://localhost:3000/frontend/index.html`);
+          return Response.redirect(`${getBaseUrl()}/frontend/index.html`);
       } catch (e) {
           return new Response(`Auth error: ${e}`, { status: 500 });
       }
