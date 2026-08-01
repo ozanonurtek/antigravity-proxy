@@ -1,8 +1,13 @@
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, beforeAll } from "bun:test";
 import { transformToGoogleBody, transformGoogleEventToOpenAI } from "../../src/utils/transform";
+import { loadProxyConfig } from "../../src/config/manager";
 
 describe("Unit Tests: transformToGoogleBody", () => {
+  beforeAll(async () => {
+    await loadProxyConfig();
+  });
+
   test("Basic message transformation", () => {
     const openaiBody = {
       model: "gpt-4o",

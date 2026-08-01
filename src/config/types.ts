@@ -9,6 +9,14 @@ export interface ProxyConfig {
   logging: LoggingConfig;
   features: FeaturesConfig;
   scheduling: SchedulingConfig;
+  security: SecurityConfig;
+}
+
+export interface SecurityConfig {
+  /** API keys required to access OpenAI compatible endpoints (/v1/*) */
+  apiKeys: string[];
+  /** Password required to access Web Console and Management API */
+  webPassword?: string;
 }
 
 export interface RotationConfig {

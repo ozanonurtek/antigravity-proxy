@@ -749,6 +749,96 @@ async function loadConfig() {
     }
 }
 
+async function checkAuthStatus() {
+    try {
+        const res = await fetch('/api/auth/status');
+        if (res.ok) {
+            const status = await res.json();
+            const loginModal = $('login-modal');
+            const btnLogout = $('btn-logout');
+
+            if (status.authRequired) {
+                if (btnLogout) btnLogout.classList.remove('hidden');
+            } else {
+                if (btnLogout) btnLogout.classList.add('hidden');
+            }
+
+            if (status.authRequired && !status.authenticated) {
+                if (loginModal) loginModal.classList.remove('hidden');
+                return false;
+            } else {
+                if (loginModal) loginModal.classList.add('hidden');
+                return true;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to check auth status:', e);
+    }
+    return true;
+}
+
+async function handleLoginSubmit(event) {
+    event.preventDefault();
+    const passInput = $('login-password');
+    const errorEl = $('login-error');
+    const btn = $('login-btn');
+    const password = passInput.value;
+
+    if (errorEl) {
+        errorEl.classList.add('hidden');
+        errorEl.textContent = '';
+    }
+
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+
+        if (res.ok) {
+            const loginModal = $('login-modal');
+            if (loginModal) loginModal.classList.add('hidden');
+            const btnLogout = $('btn-logout');
+            if (btnLogout) btnLogout.classList.remove('hidden');
+            
+            loadConfig();
+            setupSSE();
+        } else {
+            const data = await res.json();
+            if (errorEl) {
+                errorEl.textContent = data.error || 'Incorrect password';
+                errorEl.classList.remove('hidden');
+            }
+        }
+    } catch (e) {
+        if (errorEl) {
+            errorEl.textContent = 'Login failed: ' + e.message;
+            errorEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+        console.error('Logout error:', e);
+    }
+    window.location.reload();
+}
+
+function togglePasswordVisibility() {
+    const input = $('login-password');
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+}
+
 function openConfigModal() {
     if (!currentConfig) {
         addLog('[CONFIG] Configuration not loaded yet');
@@ -768,6 +858,12 @@ function openConfigModal() {
     $('cfg-blacklist').value = currentConfig.models.blacklist.join('\n');
     $('cfg-retry-max').value = currentConfig.retry.maxAttempts;
     $('cfg-retry-threshold').value = currentConfig.retry.transientRetryThresholdSeconds;
+
+    if (currentConfig.security) {
+        if ($('cfg-security-apikeys')) $('cfg-security-apikeys').value = (currentConfig.security.apiKeys || []).join('\n');
+        if ($('cfg-security-webpassword')) $('cfg-security-webpassword').value = currentConfig.security.webPassword || '';
+    }
+
     $('config-modal').classList.remove('hidden');
 }
 
@@ -776,6 +872,9 @@ function closeConfigModal() {
 }
 
 async function saveConfig() {
+    const apiKeysVal = $('cfg-security-apikeys') ? $('cfg-security-apikeys').value : '';
+    const webPasswordVal = $('cfg-security-webpassword') ? $('cfg-security-webpassword').value : '';
+
     const updates = {
         rotation: {
             cooldown: {
@@ -807,6 +906,10 @@ async function saveConfig() {
         retry: {
             maxAttempts: parseInt($('cfg-retry-max').value),
             transientRetryThresholdSeconds: parseInt($('cfg-retry-threshold').value)
+        },
+        security: {
+            apiKeys: apiKeysVal.split(/[\n,]+/).map(k => k.trim()).filter(Boolean),
+            webPassword: webPasswordVal.trim()
         }
     };
 
@@ -821,6 +924,7 @@ async function saveConfig() {
             currentConfig = await res.json();
             addLog('[CONFIG] Configuration saved successfully');
             closeConfigModal();
+            checkAuthStatus();
         } else {
             const error = await res.json();
             addLog(`[CONFIG] Failed to save: ${error.error}`);
@@ -862,11 +966,14 @@ function setupSSE() {
     });
 }
 
-function initializeApp() {
+async function initializeApp() {
     initTheme();
-    loadConfig();
-    setupSSE();
     setupLogsInteraction();
+    const isAuthed = await checkAuthStatus();
+    if (isAuthed) {
+        loadConfig();
+        setupSSE();
+    }
     setInterval(() => {
         const hasActiveCooldowns = Object.values(globalCooldowns).some(expiry => expiry > Date.now());
         if (hasActiveCooldowns) {
@@ -882,3 +989,7 @@ function initializeApp() {
 }
 
 window.initializeApp = initializeApp;
+window.handleLoginSubmit = handleLoginSubmit;
+window.handleLogout = handleLogout;
+window.togglePasswordVisibility = togglePasswordVisibility;
+

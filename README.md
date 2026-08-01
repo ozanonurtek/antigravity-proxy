@@ -28,7 +28,7 @@ bunx antigravity-proxy@0.7.0
 
 ### Docker Hub
 ```bash
-docker run -d -p 3000:3000 -e BASE_URL=http://localhost:3000 --name antigravity-proxy frieserpaldi/antigravity-proxy:0.7.0
+docker run -d -p 3000:3000 -e BASE_URL=http://localhost:3000 --name antigravity-proxy ozanonurtek/antigravity-proxy:0.8.0
 ```
 
 ### Local Execution (Bun)
@@ -150,7 +150,32 @@ Antigravity Proxy acts as a sophisticated bridge that translates OpenAI-formatte
 - **Sticky**: Keeps a client session tied to the same account for consistency.
 - **Round-Robin**: Cycles through all available accounts evenly.
 
+## Security & Hosting Deployment Authentication
+
+When deploying Antigravity Proxy to a public or hosting server, you can secure both the OpenAI API endpoints and the Web Dashboard.
+
+### 1. OpenAI API Token Protection
+Protect `/v1/chat/completions`, `/v1/models`, and OpenAI API routes with API tokens:
+- **Environment Variable**: Set `API_KEY` (or `API_KEYS=key1,key2`)
+- **Web UI**: Configure under Settings -> **Security & Access Control** -> **API Keys**.
+- **Client Request**: Include `Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY>` in your API headers.
+
+```bash
+# Example environment variable deployment
+docker run -d -p 3000:3000 \
+  -e API_KEY=sk-my-secret-key \
+  -e WEB_PASSWORD=my_dashboard_password \
+  --name antigravity-proxy ozanonurtek/antigravity-proxy:0.8.0
+```
+
+### 2. Single Password Web Dashboard Protection
+Protect the Web Dashboard console and management API endpoints with password authentication:
+- **Environment Variable**: Set `WEB_PASSWORD` (or `DASHBOARD_PASSWORD`)
+- **Web UI**: Configure under Settings -> **Security & Access Control** -> **Web Console Password**.
+- **Authentication**: Opening the web dashboard prompts for the Web Password. A secure session cookie (`ag_session`) is created upon successful login.
+
 ## Security Notes
 - **Safety Filters**: Controlled via `SAFETY_THRESHOLD` (default: `BLOCK_NONE`).
 - **Credentials**: OAuth tokens are stored locally in `antigravity-accounts.json`. Do not share or commit this file.
+
 

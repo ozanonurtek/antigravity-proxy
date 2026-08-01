@@ -92,6 +92,10 @@ const DEFAULT_CONFIG: ProxyConfig = {
     mode: 'cache_first',
     maxCacheFirstWaitSeconds: 60,
     maxRateLimitWaitSeconds: 300
+  },
+  security: {
+    apiKeys: [],
+    webPassword: ''
   }
 };
 
@@ -102,21 +106,43 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
     
     if (!exists) {
       console.log('[Config] config.json not found, creating with defaults...');
-      await saveProxyConfig(DEFAULT_CONFIG);
-      config = DEFAULT_CONFIG;
+      config = applyEnvOverrides(DEFAULT_CONFIG);
+      await saveProxyConfig(config);
       return config;
     }
     
     const text = await file.text();
     const loadedConfig = JSON.parse(text);
-    config = deepMerge(DEFAULT_CONFIG, loadedConfig) as ProxyConfig;
+    config = applyEnvOverrides(deepMerge(DEFAULT_CONFIG, loadedConfig) as ProxyConfig);
     console.log(`[Config] Loaded configuration: strategy=${config.rotation.strategy}`);
     return config;
   } catch (e) {
     console.error('[Config] Failed to load config.json, using defaults:', e);
-    config = DEFAULT_CONFIG;
+    config = applyEnvOverrides(DEFAULT_CONFIG);
     return config;
   }
+}
+
+function applyEnvOverrides(cfg: ProxyConfig): ProxyConfig {
+  const result = { ...cfg };
+  if (!result.security) {
+    result.security = { apiKeys: [], webPassword: '' };
+  } else {
+    result.security = { ...result.security };
+  }
+
+  const envApiKeys = process.env.API_KEYS || process.env.API_KEY || '';
+  if (envApiKeys) {
+    const parsedKeys = envApiKeys.split(',').map(k => k.trim()).filter(Boolean);
+    result.security.apiKeys = Array.from(new Set([...(result.security.apiKeys || []), ...parsedKeys]));
+  }
+
+  const envWebPassword = process.env.WEB_PASSWORD || process.env.DASHBOARD_PASSWORD || process.env.ADMIN_PASSWORD || '';
+  if (envWebPassword) {
+    result.security.webPassword = envWebPassword.trim();
+  }
+
+  return result;
 }
 
 export async function saveProxyConfig(newConfig: ProxyConfig): Promise<void> {

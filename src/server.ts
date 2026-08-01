@@ -13,6 +13,7 @@ import { transformToGoogleBody, transformGoogleEventToOpenAI, createOpenAIStream
 import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint } from "./utils/headers";
 import { refreshAllQuotas, fetchQuota, supportedModelsCache } from "./api/quota";
 import { parseGoogleError } from "./utils/errors";
+import { isApiAuthorized, isWebAuthenticated, isWebAuthRequired, createWebSession, destroyWebSession } from "./auth/security";
 
 const logBuffer: string[] = [];
 const MAX_LOGS = 200;
@@ -67,6 +68,104 @@ Bun.serve({
                 "Access-Control-Max-Age": "86400",
             }
         });
+    }
+
+    // Authentication Endpoints for Web Dashboard
+    if (cleanPath === "/api/auth/status" && req.method === "GET") {
+        return new Response(JSON.stringify({
+            authRequired: isWebAuthRequired(),
+            authenticated: isWebAuthenticated(req)
+        }), {
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            }
+        });
+    }
+
+    if (cleanPath === "/api/auth/login" && req.method === "POST") {
+        try {
+            const body = await req.json() as any;
+            const config = getProxyConfig();
+            const webPassword = config.security?.webPassword;
+            if (!webPassword || body.password === webPassword) {
+                const token = createWebSession();
+                return new Response(JSON.stringify({ success: true, token }), {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                        "Set-Cookie": `ag_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+                    }
+                });
+            } else {
+                return new Response(JSON.stringify({ error: "Invalid password" }), {
+                    status: 401,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*"
+                    }
+                });
+            }
+        } catch (e: any) {
+            return new Response(JSON.stringify({ error: "Bad request" }), { status: 400 });
+        }
+    }
+
+    if (cleanPath === "/api/auth/logout" && req.method === "POST") {
+        const cookieHeader = req.headers.get("cookie") || "";
+        const authHeader = req.headers.get("authorization") || "";
+        const tokenFromHeader = authHeader.replace(/^Bearer\s+/i, "").trim();
+        const match = cookieHeader.match(/ag_session=([^;]+)/);
+        const token = tokenFromHeader || (match ? match[1] : "");
+        if (token) {
+            destroyWebSession(token);
+        }
+        return new Response(JSON.stringify({ success: true }), {
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Set-Cookie": "ag_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            }
+        });
+    }
+
+    // OpenAI API Key Protection (/v1/*)
+    if (cleanPath.startsWith("/v1/")) {
+        if (!isApiAuthorized(req)) {
+            return new Response(JSON.stringify({
+                error: {
+                    message: "Incorrect API key provided.",
+                    type: "invalid_request_error",
+                    param: null,
+                    code: "invalid_api_key"
+                }
+            }), {
+                status: 401,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                    "WWW-Authenticate": 'Bearer realm="antigravity-proxy"'
+                }
+            });
+        }
+    }
+
+    // Web Dashboard / Management API Protection (/api/*, /oauth/*)
+    if (cleanPath.startsWith("/api/") || cleanPath.startsWith("/oauth")) {
+        if (!isWebAuthenticated(req)) {
+            return new Response(JSON.stringify({
+                error: {
+                    message: "Unauthorized: Web password required.",
+                    code: "unauthorized"
+                }
+            }), {
+                status: 401,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            });
+        }
     }
     if (cleanPath === "/oauth/start") {
       return Response.redirect(generateAuthUrl());
