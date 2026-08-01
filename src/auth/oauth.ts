@@ -63,7 +63,7 @@ export async function getProjectId(accessToken: string): Promise<string> {
         method: "POST",
         headers: getImpersonationHeaders(accessToken),
         body: JSON.stringify({
-          metadata: { ideType: ideType, platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" }
+          metadata: { ideType: ideType }
         })
       });
 
