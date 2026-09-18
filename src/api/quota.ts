@@ -2,6 +2,9 @@ import { getImpersonationHeaders, generateFingerprint } from "../utils/headers";
 import { type AntigravityAccount } from "../auth/types";
 import { getAccounts, saveAccounts } from "../auth/manager";
 import { refreshAccessToken } from "../auth/oauth";
+import { supportedModelsCache } from "../utils/model-registry";
+
+export { supportedModelsCache } from "../utils/model-registry";
 
 export async function fetchQuota(account: AntigravityAccount, retry = true): Promise<AntigravityAccount['quota'] | null> {
   if (!account.projectId || !account.accessToken) return null;
@@ -59,8 +62,6 @@ function getNextMidnightPT(): string {
     const diffMs = midnightPT.getTime() - ptDate.getTime();
     return new Date(now.getTime() + diffMs).toISOString();
 }
-
-export const supportedModelsCache: Set<string> = new Set();
 
 function parseQuotaResponse(data: any): AntigravityAccount['quota'] | null {
     // Handle both array and map formats

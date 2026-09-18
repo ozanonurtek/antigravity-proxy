@@ -12,6 +12,7 @@ import { generateAuthUrl, exchangeCode, getUserEmail, getProjectId } from "./aut
 import { transformToGoogleBody, transformGoogleEventToOpenAI, createOpenAIStreamTransformer, getOriginalToolName } from "./utils/transform";
 import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint, getBaseUrl } from "./utils/headers";
 import { refreshAllQuotas, fetchQuota, supportedModelsCache } from "./api/quota";
+import { prefersCliPool } from "./utils/model-registry";
 import { parseGoogleError } from "./utils/errors";
 import { isApiAuthorized, isWebAuthenticated, isWebAuthRequired, createWebSession, destroyWebSession } from "./auth/security";
 
@@ -199,9 +200,7 @@ Bun.serve({
       const isGptModel = modelLower.includes("gpt");
 
       let useCliPool: boolean;
-      if (isClaudeModel) {
-          useCliPool = false;
-      } else if (isGptModel) {
+      if (isClaudeModel || isGptModel) {
           useCliPool = false;
       } else {
           const isAntigravityThinking = modelLower.includes("antigravity") && 
@@ -212,12 +211,7 @@ Bun.serve({
           const isExplicitAntigravity = modelLower.includes("antigravity-");
           const isExplicitSandboxModel = isAntigravityThinking || isExplicitAntigravity || modelLower.includes("image");
 
-          useCliPool = !isExplicitSandboxModel && (
-              modelLower.includes("-preview") || 
-              modelLower.includes("gemini-2.0") || 
-              modelLower.includes("gemini-2.5") ||
-              (modelLower.includes("gemini-3") && !modelLower.includes("flash"))
-          );
+          useCliPool = !isExplicitSandboxModel && prefersCliPool(openaiBody.model);
       }
       
        let attempts = 0;

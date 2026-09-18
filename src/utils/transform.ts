@@ -1,6 +1,7 @@
 import { getSignature, cacheSignature } from "./cache";
 import { cleanJSONSchemaForAntigravity } from "./schema";
 import { getProxyConfig } from "../config/manager";
+import { isCataloguedModel, isGemini3OrNewer } from "./model-registry";
 
 const TOOL_NAME_REMAP_CACHE = new Map<string, string>();
 
@@ -107,34 +108,12 @@ export function transformToGoogleBody(
             if (googleModel === "claude-sonnet-4-5") googleModel = "claude-sonnet-4-5-thinking";
         }
 
-    const nativelySupported = [
-      "claude-sonnet-4-6",
-      "claude-sonnet-4-6-thinking",
-      "claude-sonnet-4-5", 
-      "claude-sonnet-4-5-thinking", 
-      "claude-opus-4-6-thinking",
-      "gemini-3.1-pro-high",
-      "gemini-3.1-pro-low",
-      "gemini-3.1-pro",
-      "gemini-3.1-pro-preview",
-      "gemini-3-flash",
-      "gemini-3-pro-high", 
-      "gemini-3-pro-low",
-      "gemini-3-pro",
-      "gemini-2.5-pro",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-flash-thinking",
-      "gemini-3-pro-preview",
-      "gemini-3-flash-preview"
-  ];
-  
-  const isNative = (nativelySupported.includes(googleModel) || nativelySupported.includes(baseModel));
+    const isNative = isCataloguedModel(googleModel, baseModel);
 
   if (isCli) {
       if (!googleModel.includes("claude")) {
-          // Standardize Gemini 3 CLI models to use -preview suffix
-          if (googleModel.includes("gemini-3")) {
+          // Standardize Gemini 3+ CLI models to use -preview suffix
+          if (isGemini3OrNewer(googleModel)) {
               googleModel = baseModel; // Strip tiers
               if (!googleModel.endsWith("-preview")) {
                   googleModel = `${googleModel}-preview`;
@@ -159,13 +138,8 @@ export function transformToGoogleBody(
        }
        
        if (isNative) {
-           if (baseModel.includes("gemini-3.1-pro")) {
-               googleModel = `gemini-3.1-pro-${extractedTier || "high"}`;
-           } else if (baseModel.includes("gemini-3-pro")) {
-               // Respect extracted tier for Gemini 3 Pro, fallback to high
-               googleModel = `gemini-3-pro-${extractedTier || "high"}`;
-           } else if (baseModel.includes("gemini-3-flash")) {
-               googleModel = "gemini-3-flash";
+           if (baseModel.includes("pro") && isGemini3OrNewer(baseModel)) {
+               googleModel = `${baseModel}-${extractedTier || "high"}`;
            } else {
                googleModel = baseModel;
            }
@@ -206,7 +180,7 @@ export function transformToGoogleBody(
         response: responseObj
       };
       
-      if (googleModel.includes("claude") || googleModel.includes("gemini-3")) {
+      if (googleModel.includes("claude") || isGemini3OrNewer(googleModel)) {
           funcResp.id = msg.tool_call_id;
       }
 
@@ -268,7 +242,7 @@ export function transformToGoogleBody(
               args: typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments || "{}") : tc.function.arguments
             };
             
-            if (googleModel.includes("claude") || googleModel.includes("gemini-3")) {
+            if (googleModel.includes("claude") || isGemini3OrNewer(googleModel)) {
                 funcCall.id = tc.id;
             }
 
@@ -362,13 +336,13 @@ You are pair programming with a USER to solve their coding task. The task may re
     sessionId: sessionId || crypto.randomUUID()
   };
 
-  if (isThinkingModel || googleModel.includes("gemini-3")) {
+  if (isThinkingModel || isGemini3OrNewer(googleModel)) {
     googleRequest.generationConfig.thinkingConfig = {
       includeThoughts: true,
       thinkingBudget: thinkingBudget || 16000
     };
     
-    if (googleModel.includes("gemini-3")) {
+    if (isGemini3OrNewer(googleModel)) {
         googleRequest.generationConfig.thinkingConfig.thinkingLevel = extractedTier || "low";
     }
   }
