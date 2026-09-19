@@ -152,6 +152,29 @@ The gateway can also proxy to external OpenAI-compatible providers. Requests for
 
 Both providers share the same key, configured via `OPENCODE_API_KEY` (or per-provider `apiKey` in `config.json`). Provider models (including the free Zen models) are discovered from each provider's `/models` endpoint and listed under `/v1/models`.
 
+Models are automatically routed to the correct upstream protocol. Many models are **not** served on the OpenAI Chat Completions endpoint:
+
+| Upstream API | Endpoint | Example models |
+| --- | --- | --- |
+| Chat Completions | `chat/completions` | DeepSeek, GLM, Kimi, MiniMax M3 |
+| OpenAI Responses | `responses` | GPT-5.x, Grok, Muse Spark |
+| Anthropic Messages | `messages` | Claude, Qwen, MiniMax M2.5/M2.7 |
+
+The gateway always speaks Chat Completions to clients and translates requests/responses (including streaming and tool calls) when the model lives on the Responses or Messages API. Built-in defaults cover the current Zen/Go catalogs; override them per provider with `modelApis` in `config.json`:
+
+```json
+{
+  "providers": [
+    {
+      "id": "opencode-go",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "apiKeyEnv": "OPENCODE_API_KEY",
+      "modelApis": { "gpt-5.6-luna": "responses", "minimax-m2.7": "messages" }
+    }
+  ]
+}
+```
+
 ```bash
 export OPENCODE_API_KEY=your_opencode_zen_api_key
 ```

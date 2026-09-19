@@ -1,6 +1,6 @@
 import { join, dirname } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-import { type ProxyConfig } from './types';
+import { type ProxyConfig, type ProviderConfig } from './types';
 import { EventEmitter } from 'node:events';
 
 const defaultPath = existsSync(join(process.cwd(), 'data'))
@@ -89,18 +89,79 @@ const DEFAULT_CONFIG: ProxyConfig = {
       sessionHeader: 'x-opencode-session',
       clientHeader: 'x-opencode-client',
       client: 'antigravity-proxy',
-      enabled: true
+      enabled: true,
+      // Models that are not served on the default chat/completions endpoint.
+      // See https://opencode.ai/docs/zen/#endpoints
+      modelApis: {
+        'gpt-6-astra': 'responses',
+        'gpt-5.6-sol': 'responses',
+        'gpt-5.6-terra': 'responses',
+        'gpt-5.6-luna': 'responses',
+        'gpt-5.5': 'responses',
+        'gpt-5.5-pro': 'responses',
+        'gpt-5.4': 'responses',
+        'gpt-5.4-pro': 'responses',
+        'gpt-5.4-mini': 'responses',
+        'gpt-5.4-nano': 'responses',
+        'gpt-5.3-codex': 'responses',
+        'gpt-5.3-codex-spark': 'responses',
+        'gpt-5.2': 'responses',
+        'gpt-5.2-codex': 'responses',
+        'gpt-5.1': 'responses',
+        'gpt-5.1-codex': 'responses',
+        'gpt-5.1-codex-max': 'responses',
+        'gpt-5.1-codex-mini': 'responses',
+        'gpt-5': 'responses',
+        'gpt-5-codex': 'responses',
+        'gpt-5-nano': 'responses',
+        'grok-4.6': 'responses',
+        'grok-4.5': 'responses',
+        'grok-build-0.1': 'responses',
+        'muse-spark-1.3': 'responses',
+        'muse-spark-1.2': 'responses',
+        'muse-spark-1.3-contributor-free': 'responses',
+        'claude-fable-5-1': 'messages',
+        'claude-fable-5': 'messages',
+        'claude-opus-5': 'messages',
+        'claude-opus-4-8': 'messages',
+        'claude-opus-4-7': 'messages',
+        'claude-opus-4-6': 'messages',
+        'claude-opus-4-5': 'messages',
+        'claude-sonnet-5': 'messages',
+        'claude-sonnet-4-6': 'messages',
+        'claude-sonnet-4-5': 'messages',
+        'claude-haiku-4-5': 'messages',
+        'qwen3.8-flash': 'messages',
+        'qwen3.7-max': 'messages',
+        'qwen3.7-plus': 'messages',
+        'qwen3.6-plus': 'messages',
+        'qwen3.5-plus': 'messages'
+      }
     },
     {
       id: 'opencode-go',
       name: 'OpenCode Go',
-      baseUrl: 'http://opencode.ai/zen/go/v1/',
+      baseUrl: 'https://opencode.ai/zen/go/v1',
       apiKey: '',
       apiKeyEnv: 'OPENCODE_API_KEY',
       sessionHeader: 'x-opencode-session',
       clientHeader: 'x-opencode-client',
       client: 'antigravity-proxy',
-      enabled: true
+      enabled: true,
+      // See https://opencode.ai/docs/go/#endpoints
+      modelApis: {
+        'grok-4.6': 'responses',
+        'gpt-5.6-luna': 'responses',
+        'muse-spark-1.3-contributor': 'responses',
+        'muse-spark-1.2-contributor': 'responses',
+        'minimax-m2.7': 'messages',
+        'minimax-m2.5': 'messages',
+        'qwen3.8-max': 'messages',
+        'qwen3.8-flash': 'messages',
+        'qwen3.7-max': 'messages',
+        'qwen3.7-plus': 'messages',
+        'qwen3.6-plus': 'messages'
+      }
     }
   ],
   logging: {
@@ -143,7 +204,9 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
     
     const text = await file.text();
     const loadedConfig = JSON.parse(text);
-    config = applyEnvOverrides(deepMerge(DEFAULT_CONFIG, loadedConfig) as ProxyConfig);
+    const merged = deepMerge(DEFAULT_CONFIG, loadedConfig) as ProxyConfig;
+    merged.providers = syncProviderDefaults(DEFAULT_CONFIG.providers, merged.providers);
+    config = applyEnvOverrides(merged);
     console.log(`[Config] Loaded configuration: strategy=${config.rotation.strategy}`);
     return config;
   } catch (e) {
@@ -151,6 +214,24 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
     config = applyEnvOverrides(DEFAULT_CONFIG);
     return config;
   }
+}
+
+/**
+ * Merge persisted providers with the built-in defaults so newly added default
+ * fields (e.g. `modelApis`) apply even when an older config was already saved.
+ */
+function syncProviderDefaults(defaults: ProviderConfig[] = [], loaded: ProviderConfig[] = []): ProviderConfig[] {
+  if (!loaded.length) return defaults;
+  return loaded.map(provider => {
+    const base = defaults.find(d => d.id === provider.id);
+    if (!base) return provider;
+    return {
+      ...base,
+      ...provider,
+      modelApis: { ...(base.modelApis || {}), ...(provider.modelApis || {}) },
+      defaultHeaders: { ...(base.defaultHeaders || {}), ...(provider.defaultHeaders || {}) }
+    };
+  });
 }
 
 function applyEnvOverrides(cfg: ProxyConfig): ProxyConfig {

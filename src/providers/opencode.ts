@@ -1,5 +1,11 @@
 import { getProxyConfig } from "../config/manager";
 import { type ProviderConfig } from "../config/types";
+import {
+  type UpstreamApi,
+  translateRequestToUpstream,
+  translateResponseToChat,
+  createUpstreamStreamTransformer,
+} from "./translate";
 
 export interface ResolvedProvider {
   providerId: string;
@@ -10,7 +16,26 @@ export interface ResolvedProvider {
 export const providerModelsCache = new Map<string, string[]>();
 
 const DEFAULT_CHAT_PATH = "chat/completions";
+const DEFAULT_RESPONSES_PATH = "responses";
+const DEFAULT_MESSAGES_PATH = "messages";
 const DEFAULT_MODELS_PATH = "models";
+
+/**
+ * Determine which upstream protocol a model is served on. Defaults to the
+ * OpenAI Chat Completions API, with per-model overrides from the provider
+ * config (see `modelApis`).
+ */
+export function resolveUpstreamApi(provider: ProviderConfig, upstreamModel: string): UpstreamApi {
+  const override = provider.modelApis?.[upstreamModel];
+  if (override === "responses" || override === "messages" || override === "chat") return override;
+  return "chat";
+}
+
+function upstreamPath(provider: ProviderConfig, api: UpstreamApi): string {
+  if (api === "responses") return provider.responsesPath || DEFAULT_RESPONSES_PATH;
+  if (api === "messages") return provider.messagesPath || DEFAULT_MESSAGES_PATH;
+  return provider.chatPath || DEFAULT_CHAT_PATH;
+}
 
 function providerBaseUrl(provider: ProviderConfig): string {
   return (provider.baseUrl || "").replace(/\/+$/, "");
@@ -95,7 +120,8 @@ export interface ProxyProviderOptions {
 export function buildUpstreamHeaders(
   provider: ProviderConfig,
   options: ProxyProviderOptions,
-  stream: boolean
+  stream: boolean,
+  api: UpstreamApi = "chat"
 ): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -104,7 +130,17 @@ export function buildUpstreamHeaders(
   };
 
   const key = providerApiKey(provider);
-  if (key) headers["Authorization"] = `Bearer ${key}`;
+  if (key) {
+    if (api === "messages") {
+      // Anthropic-style endpoints authenticate with x-api-key, not Bearer.
+      headers["x-api-key"] = key;
+      headers["anthropic-version"] = "2023-06-01";
+    } else {
+      headers["Authorization"] = `Bearer ${key}`;
+    }
+  } else if (api === "messages") {
+    headers["anthropic-version"] = "2023-06-01";
+  }
 
   const client = provider.client || "antigravity-proxy";
   headers["User-Agent"] = options.version ? `${client}/${options.version}` : client;
@@ -127,16 +163,19 @@ export async function proxyProviderRequest(
 ): Promise<Response> {
   const { provider, upstreamModel } = resolved;
   const baseUrl = providerBaseUrl(provider);
-  const chatPath = provider.chatPath || DEFAULT_CHAT_PATH;
-  const targetUrl = `${baseUrl}/${chatPath}`;
+  const api = resolveUpstreamApi(provider, upstreamModel);
+  const targetUrl = `${baseUrl}/${upstreamPath(provider, api)}`;
+  const isStream = openaiBody.stream === true;
+  const requestId = "chatcmpl-" + Math.random().toString(36).substring(7);
 
-  const upstreamBody = { ...openaiBody, model: upstreamModel };
-  const headers = buildUpstreamHeaders(provider, options, openaiBody.stream === true);
+  const baseBody = { ...openaiBody, model: upstreamModel };
+  const upstreamBody = translateRequestToUpstream(baseBody, api);
+  const headers = buildUpstreamHeaders(provider, options, isStream, api);
 
-  console.log(`[Provider] ${provider.id} -> ${targetUrl} (model: ${upstreamModel})`);
+  console.log(`[Provider] ${provider.id} -> ${targetUrl} (model: ${upstreamModel}, api: ${api})`);
 
   const controller = new AbortController();
-  const timeoutMs = openaiBody.stream === true ? 300000 : 120000;
+  const timeoutMs = isStream ? 300000 : 120000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -149,16 +188,38 @@ export async function proxyProviderRequest(
     clearTimeout(timeoutId);
 
     const contentType = upstream.headers.get("content-type") || "application/json";
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "Access-Control-Allow-Origin": "*",
-        "X-Antigravity-Provider": provider.id,
-      },
-    });
+    const responseHeaders = {
+      "Content-Type": contentType,
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "X-Antigravity-Provider": provider.id,
+      "X-Antigravity-Upstream-Api": api,
+    };
+
+    // Errors from the upstream are already OpenAI/Anthropic/Responses shaped and
+    // carry a readable `error.message`, so stream them straight through.
+    if (!upstream.ok || api === "chat") {
+      return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+    }
+
+    if (isStream) {
+      if (!upstream.body) {
+        return new Response(JSON.stringify({ error: { message: "No response body from upstream" } }), {
+          status: 502,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      const stream = upstream.body.pipeThrough(createUpstreamStreamTransformer(api, openaiBody.model, requestId));
+      return new Response(stream, {
+        status: 200,
+        headers: { ...responseHeaders, "Content-Type": "text/event-stream" },
+      });
+    }
+
+    const json = await upstream.json();
+    const converted = translateResponseToChat(json, api, openaiBody.model, requestId);
+    return new Response(JSON.stringify(converted), { status: 200, headers: responseHeaders });
   } catch (e: any) {
     clearTimeout(timeoutId);
     const message = e?.name === "AbortError" ? "Upstream provider timed out" : (e?.message || String(e));
