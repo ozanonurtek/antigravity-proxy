@@ -6,10 +6,42 @@ export interface ProxyConfig {
   tokens: TokensConfig;
   quota: QuotaConfig;
   endpoints: EndpointsConfig;
+  providers: ProviderConfig[];
   logging: LoggingConfig;
   features: FeaturesConfig;
   scheduling: SchedulingConfig;
   security: SecurityConfig;
+}
+
+/**
+ * External OpenAI-compatible upstream that this gateway can proxy to.
+ * Requests for models prefixed with `${id}/` are forwarded to `baseUrl`.
+ */
+export interface ProviderConfig {
+  /** Unique provider id and model prefix, e.g. "opencode" or "opencode-go" */
+  id: string;
+  /** Human readable name shown in dashboards */
+  name?: string;
+  /** OpenAI-compatible base URL (no trailing slash required) */
+  baseUrl: string;
+  /** Static API key for this upstream */
+  apiKey?: string;
+  /** Environment variable to read the API key from when `apiKey` is empty */
+  apiKeyEnv?: string;
+  /** Path appended to baseUrl for chat requests. Default: chat/completions */
+  chatPath?: string;
+  /** Path appended to baseUrl for model discovery. Default: models */
+  modelsPath?: string;
+  /** Header used to send the stable conversation/session id, e.g. "x-opencode-session" */
+  sessionHeader?: string;
+  /** Header used to identify this client upstream, e.g. "x-opencode-client" */
+  clientHeader?: string;
+  /** Value sent in `clientHeader` and as User-Agent default */
+  client?: string;
+  /** Extra headers forwarded on every upstream request */
+  defaultHeaders?: Record<string, string>;
+  /** Disable to skip this provider entirely */
+  enabled?: boolean;
 }
 
 export interface SecurityConfig {

@@ -141,6 +141,28 @@ Add the following provider to your `~/.config/opencode/opencode.json` under the 
 }
 ```
 
+### External Providers (OpenCode Zen / OpenCode Go)
+
+The gateway can also proxy to external OpenAI-compatible providers. Requests for models prefixed with a provider id are forwarded to that provider, and a stable `x-opencode-session` header is sent per conversation.
+
+| Provider id | Upstream | Model prefix |
+| --- | --- | --- |
+| `opencode` | `https://opencode.ai/zen/v1` | `opencode/<model-id>` |
+| `opencode-go` | `http://opencode.ai/zen/go/v1/` | `opencode-go/<model-id>` |
+
+Both providers share the same key, configured via `OPENCODE_API_KEY` (or per-provider `apiKey` in `config.json`). Provider models (including the free Zen models) are discovered from each provider's `/models` endpoint and listed under `/v1/models`.
+
+```bash
+export OPENCODE_API_KEY=your_opencode_zen_api_key
+```
+
+```json
+{
+  "model": "opencode-go/kimi-k3",
+  "messages": [{ "role": "user", "content": "Hello" }]
+}
+```
+
 ## How It Works
 
 Antigravity Proxy acts as a sophisticated bridge that translates OpenAI-formatted requests into Google's internal RPC protocols. It manages the complexities of authentication, session handling, and response streaming, allowing you to use high-tier models with your favorite tools.

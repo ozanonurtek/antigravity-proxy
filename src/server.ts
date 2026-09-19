@@ -14,6 +14,7 @@ import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint, getB
 import { refreshAllQuotas, fetchQuota, supportedModelsCache } from "./api/quota";
 import { prefersCliPool } from "./utils/model-registry";
 import { parseGoogleError } from "./utils/errors";
+import { resolveProvider, proxyProviderRequest, refreshProviderModels, listProviderModels, listProviderModelIds } from "./providers/opencode";
 import { isApiAuthorized, isWebAuthenticated, isWebAuthRequired, createWebSession, destroyWebSession } from "./auth/security";
 
 const logBuffer: string[] = [];
@@ -50,6 +51,14 @@ const proxyConfig = getProxyConfig();
 setInterval(refreshAllQuotas, proxyConfig.quota.refreshIntervalMs);
 // Initial quota refresh on startup
 refreshAllQuotas();
+
+// Discover models exposed by external providers (e.g. opencode zen / go)
+refreshProviderModels();
+setInterval(refreshProviderModels, proxyConfig.quota.refreshIntervalMs);
+
+function getAllModelIds(): string[] {
+    return Array.from(new Set([...supportedModelsCache, ...listProviderModelIds()])).sort();
+}
 
 Bun.serve({
   port: 3000,
@@ -180,6 +189,15 @@ Bun.serve({
             owned_by: "antigravity"
         }));
 
+        for (const model of listProviderModels()) {
+            models.push({
+                id: model.id,
+                object: "model",
+                created: Math.floor(Date.now() / 1000),
+                owned_by: model.owned_by
+            } as any);
+        }
+
         return new Response(JSON.stringify({
             object: "list",
             data: models
@@ -194,7 +212,19 @@ Bun.serve({
     if (cleanPath === "/v1/chat/completions" && req.method === "POST") {
       const openaiBody = await req.json() as any;
       const requestId = "chatcmpl-" + Math.random().toString(36).substring(7);
-      
+
+      const clientId = req.headers.get("x-client-id") || url.searchParams.get("client_id") || "unknown";
+      const firstMsg = openaiBody.messages?.[0]?.content || "";
+      const userIdent = openaiBody.user || clientId;
+      const stableSeed = `${userIdent}:${typeof firstMsg === 'string' ? firstMsg : JSON.stringify(firstMsg)}`;
+      const sessionId = firstMsg ? new Bun.CryptoHasher("sha256").update(stableSeed).digest("hex") : crypto.randomUUID();
+
+      // Route models prefixed with an external provider id (e.g. opencode/..., opencode-go/...)
+      const externalProvider = resolveProvider(openaiBody.model);
+      if (externalProvider) {
+          return proxyProviderRequest(openaiBody, externalProvider, { sessionId, version: APP_VERSION });
+      }
+
       const modelLower = openaiBody.model.toLowerCase();
       const isClaudeModel = modelLower.includes("claude");
       const isGptModel = modelLower.includes("gpt");
@@ -230,12 +260,6 @@ Bun.serve({
       const isCliOnlyModel = false;
       const CLAUDE_REGIONS = ["us-central1", "us-east5", "europe-west1"];
       
-      const clientId = req.headers.get("x-client-id") || url.searchParams.get("client_id") || "unknown";
-      const firstMsg = openaiBody.messages?.[0]?.content || "";
-      const userIdent = openaiBody.user || clientId;
-      const stableSeed = `${userIdent}:${typeof firstMsg === 'string' ? firstMsg : JSON.stringify(firstMsg)}`;
-      const sessionId = firstMsg ? new Bun.CryptoHasher("sha256").update(stableSeed).digest("hex") : crypto.randomUUID();
-
         let lastStatus = 0;
         let lastGoogleUrl = "";
 
@@ -582,12 +606,12 @@ Bun.serve({
                     version: APP_VERSION,
                     accounts: getAccounts(),
                     strategy: getStrategy(),
-                    supportedModels: Array.from(supportedModelsCache).sort(),
+                    supportedModels: getAllModelIds(),
                     cooldowns: getCooldowns(),
                     logs: logBuffer
                 });
 
-                onUpdate = (data: any) => send("update", { ...data, supportedModels: Array.from(supportedModelsCache).sort() });
+                onUpdate = (data: any) => send("update", { ...data, supportedModels: getAllModelIds() });
                 onFlash = (data: { email: string, status: 'success' | 'error' }) => send("flash", data);
                 onLog = (msg: string) => send("log", { message: msg });
                 onCooldown = (data: any) => send("cooldown", data);
@@ -620,7 +644,7 @@ Bun.serve({
             version: APP_VERSION,
             accounts: getAccounts(),
             strategy: getStrategy(),
-            supportedModels: Array.from(supportedModelsCache).sort()
+            supportedModels: getAllModelIds()
         }), { headers: { "Content-Type": "application/json" } });
     }
 

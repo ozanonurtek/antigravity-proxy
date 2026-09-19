@@ -79,6 +79,30 @@ const DEFAULT_CONFIG: ProxyConfig = {
         'https://autopush-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse'
       ]
     },
+  providers: [
+    {
+      id: 'opencode',
+      name: 'OpenCode Zen',
+      baseUrl: 'https://opencode.ai/zen/v1',
+      apiKey: '',
+      apiKeyEnv: 'OPENCODE_API_KEY',
+      sessionHeader: 'x-opencode-session',
+      clientHeader: 'x-opencode-client',
+      client: 'antigravity-proxy',
+      enabled: true
+    },
+    {
+      id: 'opencode-go',
+      name: 'OpenCode Go',
+      baseUrl: 'http://opencode.ai/zen/go/v1/',
+      apiKey: '',
+      apiKeyEnv: 'OPENCODE_API_KEY',
+      sessionHeader: 'x-opencode-session',
+      clientHeader: 'x-opencode-client',
+      client: 'antigravity-proxy',
+      enabled: true
+    }
+  ],
   logging: {
     maxBufferSize: 200,
     enableConsoleCapture: true
