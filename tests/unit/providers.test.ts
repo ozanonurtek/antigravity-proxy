@@ -1,5 +1,5 @@
 import { expect, test, describe, beforeAll } from "bun:test";
-import { matchProvider, buildUpstreamHeaders, proxyProviderRequest, resolveUpstreamApi } from "../../src/providers/opencode";
+import { matchProvider, buildUpstreamHeaders, proxyProviderRequest, resolveUpstreamApi, prefixProviderModel, upstreamApiFromModel, providerModelsCache } from "../../src/providers/opencode";
 import { type ProviderConfig } from "../../src/config/types";
 
 const providers: ProviderConfig[] = [
@@ -84,12 +84,70 @@ describe("buildUpstreamHeaders", () => {
   });
 });
 
+describe("prefixProviderModel", () => {
+  test("keeps the upstream capability metadata and prefixes the id", () => {
+    const upstream = {
+      id: "deepseek-v4.1-flash",
+      object: "model",
+      owned_by: "opencode",
+      name: "DeepSeek V4.1 Flash",
+      modalities: { input: ["text", "image/png"], output: ["text"] },
+      capabilities: { tools: { supported: true }, reasoning: { supported: true, effort: ["low", "high"] } },
+      limit: { context: 1000000, output: 384000 },
+      cost: { text: { input: { price: 0.15 } } },
+    };
+
+    const model = prefixProviderModel("opencode-go", upstream);
+
+    expect(model.id).toBe("opencode-go/deepseek-v4.1-flash");
+    expect(model.owned_by).toBe("opencode");
+    expect(model.name).toBe("DeepSeek V4.1 Flash");
+    expect(model.modalities).toEqual(upstream.modalities);
+    expect(model.capabilities).toEqual(upstream.capabilities);
+    expect(model.limit).toEqual(upstream.limit);
+    expect(model.cost).toEqual(upstream.cost);
+  });
+
+  test("fills object and owned_by when the upstream omits them", () => {
+    const model = prefixProviderModel("opencode", { id: "kimi-k3" });
+    expect(model.id).toBe("opencode/kimi-k3");
+    expect(model.object).toBe("model");
+    expect(model.owned_by).toBe("opencode");
+  });
+});
+
+describe("upstreamApiFromModel", () => {
+  test("reads the protocol from the discovered api object", () => {
+    expect(upstreamApiFromModel({ api: { "chat-completions": {} } })).toBe("chat");
+    expect(upstreamApiFromModel({ api: { responses: {} } })).toBe("responses");
+    expect(upstreamApiFromModel({ api: { messages: {} } })).toBe("messages");
+    expect(upstreamApiFromModel({ api: { "generate-content": {} } })).toBe("google");
+    expect(upstreamApiFromModel({})).toBeNull();
+  });
+});
+
 describe("resolveUpstreamApi", () => {
   test("defaults to chat", () => {
+    providerModelsCache.delete("opencode");
     expect(resolveUpstreamApi(providers[0], "kimi-k3")).toBe("chat");
   });
 
-  test("honours per-model overrides", () => {
+  test("uses the protocol published by the provider's /models payload", () => {
+    providerModelsCache.set("opencode", [
+      { id: "gpt-5.6-luna", api: { responses: {} } },
+      { id: "claude-sonnet-4-6", api: { messages: {} } },
+      { id: "kimi-k3", api: { "chat-completions": {} } },
+    ]);
+
+    expect(resolveUpstreamApi(providers[0], "gpt-5.6-luna")).toBe("responses");
+    expect(resolveUpstreamApi(providers[0], "claude-sonnet-4-6")).toBe("messages");
+    expect(resolveUpstreamApi(providers[0], "kimi-k3")).toBe("chat");
+
+    providerModelsCache.delete("opencode");
+  });
+
+  test("honours per-model overrides for providers without api metadata", () => {
+    providerModelsCache.delete("opencode");
     const provider: ProviderConfig = {
       ...providers[0],
       modelApis: { "gpt-5.6-luna": "responses", "claude-sonnet-4-6": "messages" },
@@ -97,6 +155,13 @@ describe("resolveUpstreamApi", () => {
     expect(resolveUpstreamApi(provider, "gpt-5.6-luna")).toBe("responses");
     expect(resolveUpstreamApi(provider, "claude-sonnet-4-6")).toBe("messages");
     expect(resolveUpstreamApi(provider, "kimi-k3")).toBe("chat");
+  });
+
+  test("explicit overrides win over discovered metadata", () => {
+    providerModelsCache.set("opencode", [{ id: "gpt-5.6-luna", api: { responses: {} } }]);
+    const provider: ProviderConfig = { ...providers[0], modelApis: { "gpt-5.6-luna": "chat" } };
+    expect(resolveUpstreamApi(provider, "gpt-5.6-luna")).toBe("chat");
+    providerModelsCache.delete("opencode");
   });
 });
 
@@ -173,6 +238,104 @@ describe("proxyProviderRequest", () => {
       expect(json.choices[0].message.content).toBe("Hello");
       expect(json.usage.total_tokens).toBe(2);
     } finally {
+      server.stop(true);
+    }
+  });
+
+  test("routes Google GenAI models, uses x-goog-api-key and converts the response", async () => {
+    let path = "";
+    let query = "";
+    let received: any = null;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        path = url.pathname;
+        query = url.search;
+        received = { headers: Object.fromEntries(req.headers), body: await req.json() };
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { role: "model", parts: [{ text: "Hello" }] }, finishReason: "STOP" },
+            ],
+            usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 },
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      },
+    });
+
+    try {
+      const provider: ProviderConfig = {
+        ...providers[0],
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        apiKey: "sk-test",
+      };
+      providerModelsCache.set("opencode", [{ id: "gemini-3.8-flash", api: { "generate-content": {} } }]);
+
+      const res = await proxyProviderRequest(
+        { model: "opencode/gemini-3.8-flash", messages: [{ role: "user", content: "hi" }], stream: false },
+        { providerId: "opencode", provider, upstreamModel: "gemini-3.8-flash" },
+        { sessionId: "ses_g" }
+      );
+
+      expect(path).toBe("/models/gemini-3.8-flash:generateContent");
+      expect(query).toBe("");
+      expect(received.headers["x-goog-api-key"]).toBe("sk-test");
+      expect(received.headers["authorization"]).toBeUndefined();
+      expect(received.body.contents).toEqual([{ role: "user", parts: [{ text: "hi" }] }]);
+      expect(res.headers.get("X-Antigravity-Upstream-Api")).toBe("google");
+
+      const json = await res.json() as any;
+      expect(json.choices[0].message.content).toBe("Hello");
+      expect(json.usage.total_tokens).toBe(3);
+    } finally {
+      providerModelsCache.delete("opencode");
+      server.stop(true);
+    }
+  });
+
+  test("routes Google GenAI streaming requests", async () => {
+    let path = "";
+    let query = "";
+    const sse = [
+      `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}\n\n`,
+      `data: {"candidates":[{"content":{"role":"model","parts":[{"text":" world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2,"totalTokenCount":4}}\n\n`,
+    ].join("");
+
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        path = url.pathname;
+        query = url.search;
+        return new Response(sse, { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+
+    try {
+      const provider: ProviderConfig = {
+        ...providers[0],
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        apiKey: "sk-test",
+      };
+      providerModelsCache.set("opencode", [{ id: "gemini-3.8-flash", api: { "generate-content": {} } }]);
+
+      const res = await proxyProviderRequest(
+        { model: "opencode/gemini-3.8-flash", messages: [{ role: "user", content: "hi" }], stream: true },
+        { providerId: "opencode", provider, upstreamModel: "gemini-3.8-flash" },
+        { sessionId: "ses_g" }
+      );
+
+      expect(path).toBe("/models/gemini-3.8-flash:streamGenerateContent");
+      expect(query).toBe("?alt=sse");
+      expect(res.headers.get("Content-Type")).toBe("text/event-stream");
+      const text = await res.text();
+      expect(text).toContain('"content":"Hello"');
+      expect(text).toContain('"content":" world"');
+      expect(text).toContain("data: [DONE]");
+    } finally {
+      providerModelsCache.delete("opencode");
       server.stop(true);
     }
   });

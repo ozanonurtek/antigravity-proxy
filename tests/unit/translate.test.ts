@@ -128,6 +128,56 @@ describe("translateRequestToUpstream", () => {
     const out = translateRequestToUpstream({ model: "m", messages: [{ role: "user", content: "hi" }] }, "messages");
     expect(out.max_tokens).toBe(4096);
   });
+
+  test("maps chat to the Google GenAI API", () => {
+    const out = translateRequestToUpstream(
+      {
+        model: "gemini-3.8-flash",
+        max_tokens: 64,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: "sys" },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "what is this?" },
+              { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+            ],
+          },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [{ id: "call_1", function: { name: "get_weather", arguments: '{"city":"Paris"}' } }],
+          },
+          { role: "tool", tool_call_id: "call_1", content: '{"temp":21}' },
+        ],
+        tools,
+        tool_choice: "required",
+      },
+      "google"
+    );
+
+    expect(out.systemInstruction).toEqual({ parts: [{ text: "sys" }] });
+    expect(out.contents[0]).toEqual({
+      role: "user",
+      parts: [{ text: "what is this?" }, { inlineData: { mimeType: "image/png", data: "AAAA" } }],
+    });
+    expect(out.contents[1]).toEqual({
+      role: "model",
+      parts: [{ functionCall: { name: "get_weather", args: { city: "Paris" } } }],
+    });
+    expect(out.contents[2]).toEqual({
+      role: "user",
+      parts: [{ functionResponse: { name: "get_weather", response: { temp: 21 } } }],
+    });
+    expect(out.generationConfig).toEqual({ temperature: 0.2, maxOutputTokens: 64 });
+    expect(out.tools[0].functionDeclarations[0]).toEqual({
+      name: "get_weather",
+      description: "Get weather",
+      parameters: tools[0].function.parameters,
+    });
+    expect(out.toolConfig.functionCallingConfig.mode).toBe("ANY");
+  });
 });
 
 describe("translateResponseToChat", () => {
@@ -196,9 +246,46 @@ describe("translateResponseToChat", () => {
     const out = translateResponseToChat({ content: [], stop_reason: "max_tokens" }, "messages", "m", "id");
     expect(out.choices[0].finish_reason).toBe("length");
   });
+
+  test("converts a Google GenAI completion", () => {
+    const out = translateResponseToChat(
+      {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                { text: "let me check", thought: true },
+                { text: "Checking" },
+                { functionCall: { name: "get_weather", args: { city: "Paris" } } },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4, totalTokenCount: 14 },
+      },
+      "google",
+      "opencode/gemini-3.8-flash",
+      "chatcmpl-1"
+    );
+    expect(out.choices[0].message.content).toBe("Checking");
+    expect(out.choices[0].message.reasoning_content).toBe("let me check");
+    expect(out.choices[0].message.tool_calls[0].function).toEqual({
+      name: "get_weather",
+      arguments: '{"city":"Paris"}',
+    });
+    expect(out.choices[0].finish_reason).toBe("tool_calls");
+    expect(out.usage).toEqual({ prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 });
+  });
+
+  test("maps Google MAX_TOKENS to length", () => {
+    const out = translateResponseToChat({ candidates: [{ finishReason: "MAX_TOKENS" }] }, "google", "m", "id");
+    expect(out.choices[0].finish_reason).toBe("length");
+  });
 });
 
-async function runStream(fixture: string, api: "responses" | "messages") {
+async function runStream(fixture: string, api: "responses" | "messages" | "google") {
   const transformer = createUpstreamStreamTransformer(api, "opencode-go/test", "chatcmpl-test");
   const writer = transformer.writable.getWriter();
   const reader = transformer.readable.getReader();
@@ -311,5 +398,24 @@ describe("stream translation", () => {
       .join("");
     expect(args).toBe('{"city":"Paris"}');
     expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe("tool_calls");
+  });
+
+  test("converts Google GenAI text, thinking and tool-call parts", async () => {
+    const fixture = [
+      `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hmm","thought":true}]}}]}\n\n`,
+      `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}\n\n`,
+      `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3,"totalTokenCount":8}}\n\n`,
+    ].join("");
+
+    const lines = await runStream(fixture, "google");
+    const chunks = lines.filter(l => l !== "[DONE]").map(l => JSON.parse(l));
+    expect(chunks.map(c => c.choices[0].delta.reasoning_content).filter(Boolean).join("")).toBe("hmm");
+    expect(chunks.map(c => c.choices[0].delta.content).filter(Boolean).join("")).toBe("Hello");
+    const toolCall = chunks.flatMap(c => c.choices[0].delta.tool_calls || [])[0];
+    expect(toolCall.function).toEqual({ name: "get_weather", arguments: '{"city":"Paris"}' });
+    const last = chunks[chunks.length - 1];
+    expect(last.choices[0].finish_reason).toBe("tool_calls");
+    expect(last.usage).toEqual({ prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 });
+    expect(lines[lines.length - 1]).toBe("[DONE]");
   });
 });

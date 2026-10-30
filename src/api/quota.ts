@@ -2,7 +2,7 @@ import { getImpersonationHeaders, generateFingerprint } from "../utils/headers";
 import { type AntigravityAccount } from "../auth/types";
 import { getAccounts, saveAccounts } from "../auth/manager";
 import { refreshAccessToken } from "../auth/oauth";
-import { supportedModelsCache } from "../utils/model-registry";
+import { recordSupportedModel, recordImageGenerationModels } from "../utils/model-registry";
 
 export { supportedModelsCache } from "../utils/model-registry";
 
@@ -22,7 +22,9 @@ export async function fetchQuota(account: AntigravityAccount, retry = true): Pro
       },
       body: JSON.stringify({
         project: account.projectId
-      })
+      }),
+      // Keep startup from blocking on a slow catalog endpoint.
+      signal: AbortSignal.timeout(15000),
     });
 
     if (res.status === 401 && retry) {
@@ -64,6 +66,9 @@ function getNextMidnightPT(): string {
 }
 
 function parseQuotaResponse(data: any): AntigravityAccount['quota'] | null {
+    // Native model capabilities come from the same catalog response.
+    recordImageGenerationModels(data.imageGenerationModelIds);
+
     // Handle both array and map formats
     let rawModels = data.availableModels || data.models || [];
     let entries: [string, any][] = [];
@@ -84,13 +89,13 @@ function parseQuotaResponse(data: any): AntigravityAccount['quota'] | null {
         // Skip unknown or placeholder models
         if (label === "Unknown" || lowerLabel === "unknown") continue;
 
-        // Cache supported model ID/Name
+        // Cache the model and the capability metadata the upstream reported.
         const modelId = key.replace("models/", "");
         // If the key is a valid ID without spaces, cache it. Otherwise cache label.
         if (modelId && modelId !== "Unknown" && !modelId.includes(" ")) {
-            supportedModelsCache.add(modelId);
+            recordSupportedModel(modelId, m);
         } else if (label !== "Unknown") {
-            supportedModelsCache.add(label);
+            recordSupportedModel(label, m);
         }
 
         const allowedPatterns = [
