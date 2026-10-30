@@ -16,7 +16,7 @@
     "lint:html": "bun -e \"const c=await Bun.file('src/frontend/index.html').text(); try { new Function(c.match(/<script>([\\s\\S]*?)<\\/script>/)[1]) } catch(e) { console.error(e); process.exit(1) }\""
   },
   "dependencies": {
-    "bun": "^1.0.0"
+    "bun": "^1.4.4"
   },
   "devDependencies": {
     "@types/bun": "latest",
