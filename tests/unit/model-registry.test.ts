@@ -62,6 +62,10 @@ describe("Native model metadata", () => {
     expect(model.capabilities.reasoning).toEqual({ supported: true });
     expect(model.limit).toEqual({ context: 1048576, output: 65536 });
     expect(model.supportsImages).toBe(true);
+    expect(model.architecture.input_modalities).toEqual(expect.arrayContaining(["text", "image", "video"]));
+    expect(model.architecture.output_modalities).toEqual(["text"]);
+    expect(model.supported_parameters).toEqual(expect.arrayContaining(["tools", "reasoning", "include_reasoning"]));
+    expect(model.reasoning).toMatchObject({ default_enabled: true });
 
     supportedModelMetadata.delete("gemini-catalog-test");
     supportedModelsCache.delete("gemini-catalog-test");

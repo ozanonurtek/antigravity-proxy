@@ -106,6 +106,15 @@ describe("prefixProviderModel", () => {
     expect(model.capabilities).toEqual(upstream.capabilities);
     expect(model.limit).toEqual(upstream.limit);
     expect(model.cost).toEqual(upstream.cost);
+    expect(model.architecture.input_modalities).toEqual(expect.arrayContaining(["text", "image"]));
+    expect(model.architecture.output_modalities).toEqual(["text"]);
+    expect(model.supported_parameters).toEqual(expect.arrayContaining(["tools", "reasoning", "reasoning_effort"]));
+    expect(model.reasoning).toEqual({
+      supported_efforts: ["low", "high"],
+      default_enabled: true,
+      mandatory: true,
+      supports_max_tokens: false,
+    });
   });
 
   test("fills object and owned_by when the upstream omits them", () => {
@@ -113,6 +122,34 @@ describe("prefixProviderModel", () => {
     expect(model.id).toBe("opencode/kimi-k3");
     expect(model.object).toBe("model");
     expect(model.owned_by).toBe("opencode");
+  });
+
+  test("exposes OpenChat Connect's OpenRouter-style capability fields", () => {
+    const model = prefixProviderModel("opencode-go", {
+      id: "deepseek-v4.1-flash",
+      modalities: { input: ["text", "image/jpeg", "image/png"], output: ["text"] },
+      capabilities: {
+        tools: { supported: true },
+        reasoning: { supported: true, effort: ["low", "high", "max"] },
+        structured_output: true,
+        temperature: true,
+      },
+    });
+
+    // Mirrors OpenChat's ModelCapability.inferred input.
+    const inputs = new Set<string>(model.architecture.input_modalities);
+    const outputs = new Set<string>(model.architecture.output_modalities);
+    const params = new Set<string>(model.supported_parameters);
+    const caps: string[] = [];
+    if (inputs.has("image")) caps.push("vision");
+    if (outputs.has("image")) caps.push("imageGen");
+    if (inputs.has("file")) caps.push("files");
+    if (params.has("tools")) caps.push("tools");
+    if (params.has("reasoning") || params.has("include_reasoning")) caps.push("reasoning");
+    if (params.has("reasoning_effort") || params.has("effort")) caps.push("effort");
+
+    expect(caps).toEqual(["vision", "tools", "reasoning", "effort"]);
+    expect(model.reasoning.supported_efforts).toEqual(["low", "high", "max"]);
   });
 });
 
