@@ -48,6 +48,23 @@ function safeJsonParse(value: string | undefined, fallback: any): any {
   }
 }
 
+function dataUriPayload(value: unknown): { mimeType: string; data: string } | null {
+  if (typeof value !== "string") return null;
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/.exec(value);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+function openAIFilePart(part: any): { dataUri?: string; fileId?: string; filename?: string } {
+  if (part?.type !== "file" && part?.type !== "input_file") return {};
+  const file = part.file ?? {};
+  return {
+    dataUri: file.file_data ?? file.fileData ?? part.file_data,
+    fileId: file.file_id ?? file.fileId ?? part.file_id,
+    filename: file.filename ?? part.filename,
+  };
+}
+
 function makeChunk(
   id: string,
   model: string,
@@ -153,6 +170,13 @@ function contentToResponsesParts(content: any, textType: "input_text" | "output_
     } else if (part?.type === "image_url") {
       const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
       if (url) parts.push({ type: "input_image", image_url: url });
+    } else {
+      const file = openAIFilePart(part);
+      if (file.dataUri) {
+        parts.push({ type: "input_file", filename: file.filename, file_data: file.dataUri });
+      } else if (file.fileId) {
+        parts.push({ type: "input_file", file_id: file.fileId });
+      }
     }
   }
   return parts;
@@ -230,6 +254,17 @@ function contentToAnthropicParts(content: any): any[] {
     } else if (part?.type === "image_url") {
       const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
       if (url) parts.push(canvasImageToAnthropic(url));
+    } else {
+      const file = openAIFilePart(part);
+      const payload = dataUriPayload(file.dataUri);
+      if (payload) {
+        parts.push({
+          type: "document",
+          source: { type: "base64", media_type: payload.mimeType, data: payload.data },
+        });
+      } else if (part?.source?.type === "base64") {
+        parts.push({ type: "document", source: part.source });
+      }
     }
   }
   return parts;
@@ -369,11 +404,24 @@ function contentToGoogleParts(content: any): any[] {
     } else if (part?.type === "image_url") {
       const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
       if (!url) continue;
-      const dataUrl = /^data:([^;]+);base64,(.*)$/.exec(url);
+      const dataUrl = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/.exec(url);
       if (dataUrl) {
         parts.push({ inlineData: { mimeType: dataUrl[1], data: dataUrl[2] } });
       } else {
         parts.push({ fileData: { mimeType: guessMimeType(url), fileUri: url } });
+      }
+    } else {
+      const file = openAIFilePart(part);
+      const payload = dataUriPayload(file.dataUri);
+      if (payload) {
+        parts.push({ inlineData: { mimeType: payload.mimeType, data: payload.data } });
+      } else if (part?.source?.type === "base64" && typeof part.source.data === "string") {
+        parts.push({
+          inlineData: {
+            mimeType: part.source.media_type || part.source.mediaType || "application/octet-stream",
+            data: part.source.data,
+          },
+        });
       }
     }
   }

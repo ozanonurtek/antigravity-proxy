@@ -178,6 +178,40 @@ describe("translateRequestToUpstream", () => {
     });
     expect(out.toolConfig.functionCallingConfig.mode).toBe("ANY");
   });
+
+  test("carries file parts through Responses, Messages and Google", () => {
+    const filePart = {
+      type: "file",
+      file: { filename: "spec.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQ=" },
+    };
+
+    const responses = translateRequestToUpstream(
+      { model: "m", messages: [{ role: "user", content: [filePart] }] },
+      "responses"
+    );
+    expect(responses.input[0].content).toEqual([
+      { type: "input_file", filename: "spec.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQ=" },
+    ]);
+
+    const messages = translateRequestToUpstream(
+      { model: "m", messages: [{ role: "user", content: [filePart] }] },
+      "messages"
+    );
+    expect(messages.messages[0].content).toEqual([
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "JVBERi0xLjQ=" },
+      },
+    ]);
+
+    const google = translateRequestToUpstream(
+      { model: "m", messages: [{ role: "user", content: [filePart] }] },
+      "google"
+    );
+    expect(google.contents[0].parts).toEqual([
+      { inlineData: { mimeType: "application/pdf", data: "JVBERi0xLjQ=" } },
+    ]);
+  });
 });
 
 describe("translateResponseToChat", () => {

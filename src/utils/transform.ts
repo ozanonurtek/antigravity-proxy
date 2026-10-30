@@ -33,6 +33,34 @@ export function getOriginalToolName(sanitizedName: string): string | undefined {
   return undefined;
 }
 
+function inlineDataFromDataUri(value: unknown): { mimeType: string; data: string } | null {
+  if (typeof value !== "string") return null;
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/.exec(value);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+function filePartToInlineData(part: any): { mimeType: string; data: string } | null {
+  if (!part || (part.type !== "file" && part.type !== "input_file" && part.type !== "document")) {
+    return null;
+  }
+
+  const file = part.file ?? {};
+  const dataUri = file.file_data ?? file.fileData ?? part.file_data ?? part.data;
+  const fromFile = inlineDataFromDataUri(dataUri);
+  if (fromFile) return fromFile;
+
+  // Anthropic-style document block: { source: { type: "base64", media_type, data } }
+  if (part.source?.type === "base64" && typeof part.source.data === "string") {
+    return {
+      mimeType: part.source.media_type || part.source.mediaType || "application/octet-stream",
+      data: part.source.data,
+    };
+  }
+
+  return null;
+}
+
 const CLAUDE_MODEL_REGISTRY = [
     "claude-3-7-sonnet-20250219",
     "claude-3-5-sonnet-20241022",
@@ -206,18 +234,11 @@ export function transformToGoogleBody(
               if (part.type === "text") {
                 parts.push({ text: part.text });
               } else if (part.type === "image_url" && part.image_url?.url) {
-                const url = part.image_url.url;
-                if (url.startsWith("data:")) {
-                  const match = url.match(/^data:([^;]+);base64,(.+)$/);
-                  if (match) {
-                    parts.push({
-                      inlineData: {
-                        mimeType: match[1],
-                        data: match[2]
-                      }
-                    });
-                  }
-                }
+                const inlineData = inlineDataFromDataUri(part.image_url.url);
+                if (inlineData) parts.push({ inlineData });
+              } else {
+                const inlineData = filePartToInlineData(part);
+                if (inlineData) parts.push({ inlineData });
               }
             }
           } else {
