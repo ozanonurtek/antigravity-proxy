@@ -150,26 +150,27 @@ The gateway can also proxy to external OpenAI-compatible providers. Requests for
 | `opencode` | `https://opencode.ai/zen/v1` | `opencode/<model-id>` |
 | `opencode-go` | `http://opencode.ai/zen/go/v1/` | `opencode-go/<model-id>` |
 
-Both providers share the same key, configured via `OPENCODE_API_KEY` (or per-provider `apiKey` in `config.json`). Provider models (including the free Zen models) are discovered from each provider's `/models` endpoint and listed under `/v1/models`.
+Both providers share the same key, configured via `OPENCODE_API_KEY` (or per-provider `apiKey` in `config.json`). Provider models (including the free Zen models) are discovered from each provider's `/models` endpoint and listed under `/v1/models`, keeping the upstream capability metadata (`modalities`, `capabilities`, `limit`, pricing, etc.) intact. Native Antigravity models are enriched from the live `fetchAvailableModels` catalog the same way, so `/v1/models` reflects what each model can actually accept (images, video, thinking, context limits).
 
-Models are automatically routed to the correct upstream protocol. Many models are **not** served on the OpenAI Chat Completions endpoint:
+Models are automatically routed to the correct upstream protocol using the `api` metadata published by the provider's `/models` endpoint. Many models are **not** served on the OpenAI Chat Completions endpoint:
 
 | Upstream API | Endpoint | Example models |
 | --- | --- | --- |
 | Chat Completions | `chat/completions` | DeepSeek, GLM, Kimi, MiniMax M3 |
 | OpenAI Responses | `responses` | GPT-5.x, Grok, Muse Spark |
 | Anthropic Messages | `messages` | Claude, Qwen, MiniMax M2.5/M2.7 |
+| Google GenAI | `models/{model}:generateContent` | Gemini |
 
-The gateway always speaks Chat Completions to clients and translates requests/responses (including streaming and tool calls) when the model lives on the Responses or Messages API. Built-in defaults cover the current Zen/Go catalogs; override them per provider with `modelApis` in `config.json`:
+The gateway always speaks Chat Completions to clients and translates requests/responses (including streaming and tool calls) when the model lives on the Responses, Messages or Google GenAI API. No per-model routing table is required. `modelApis` remains available only as an optional override for upstreams that do not publish `api` metadata:
 
 ```json
 {
   "providers": [
     {
-      "id": "opencode-go",
-      "baseUrl": "https://opencode.ai/zen/go/v1",
-      "apiKeyEnv": "OPENCODE_API_KEY",
-      "modelApis": { "gpt-5.6-luna": "responses", "minimax-m2.7": "messages" }
+      "id": "custom",
+      "baseUrl": "https://example.com/v1",
+      "apiKeyEnv": "CUSTOM_API_KEY",
+      "modelApis": { "some-model": "responses" }
     }
   ]
 }

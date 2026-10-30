@@ -12,7 +12,7 @@ import { generateAuthUrl, exchangeCode, getUserEmail, getProjectId } from "./aut
 import { transformToGoogleBody, transformGoogleEventToOpenAI, createOpenAIStreamTransformer, getOriginalToolName } from "./utils/transform";
 import { getImpersonationHeaders, getGeminiCliHeaders, generateFingerprint, getBaseUrl } from "./utils/headers";
 import { refreshAllQuotas, fetchQuota, supportedModelsCache } from "./api/quota";
-import { prefersCliPool } from "./utils/model-registry";
+import { prefersCliPool, buildNativeModelObject } from "./utils/model-registry";
 import { parseGoogleError } from "./utils/errors";
 import { resolveProvider, proxyProviderRequest, refreshProviderModels, listProviderModels, listProviderModelIds } from "./providers/opencode";
 import { isApiAuthorized, isWebAuthenticated, isWebAuthRequired, createWebSession, destroyWebSession } from "./auth/security";
@@ -48,9 +48,10 @@ await initManager();
 
 const proxyConfig = getProxyConfig();
 
+// Load the live native model catalog before serving. Model ids, capabilities
+// and limits always come from the upstream catalog instead of a static list.
+await refreshAllQuotas();
 setInterval(refreshAllQuotas, proxyConfig.quota.refreshIntervalMs);
-// Initial quota refresh on startup
-refreshAllQuotas();
 
 // Discover models exposed by external providers (e.g. opencode zen / go)
 refreshProviderModels();
@@ -182,21 +183,13 @@ Bun.serve({
     }
 
     if (cleanPath === "/v1/models") {
-        const models = Array.from(supportedModelsCache).sort().map(id => ({
-            id,
-            object: "model",
-            created: Math.floor(Date.now() / 1000),
-            owned_by: "antigravity"
-        }));
+        const models = Array.from(supportedModelsCache)
+            .sort()
+            .map(id => buildNativeModelObject(id));
 
-        for (const model of listProviderModels()) {
-            models.push({
-                id: model.id,
-                object: "model",
-                created: Math.floor(Date.now() / 1000),
-                owned_by: model.owned_by
-            } as any);
-        }
+        // Provider entries are mirrored from the upstream `/models` payload so
+        // capabilities, modalities, limits and pricing stay accurate.
+        models.push(...listProviderModels());
 
         return new Response(JSON.stringify({
             object: "list",
@@ -207,6 +200,30 @@ Bun.serve({
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "*"
         } });
+    }
+
+    if (cleanPath.startsWith("/v1/models/") && req.method === "GET") {
+        const modelId = cleanPath.slice("/v1/models/".length);
+        const model = listProviderModels().find(m => m.id === modelId)
+            || (supportedModelsCache.has(modelId) ? buildNativeModelObject(modelId) : null);
+
+        if (!model) {
+            return new Response(JSON.stringify({
+                error: {
+                    message: `The model '${modelId}' does not exist`,
+                    type: "invalid_request_error",
+                    param: null,
+                    code: "model_not_found"
+                }
+            }), {
+                status: 404,
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+            });
+        }
+
+        return new Response(JSON.stringify(model), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
     }
 
     if (cleanPath === "/v1/chat/completions" && req.method === "POST") {

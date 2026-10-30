@@ -37,10 +37,11 @@ export interface ProviderConfig {
   /** Path appended to baseUrl for model discovery. Default: models */
   modelsPath?: string;
   /**
-   * Per-model upstream API overrides. Keys are upstream model ids (without the
-   * `${providerId}/` prefix). Defaults to "chat" (chat/completions).
-   * Many OpenCode models are only served on the Responses API (`responses`)
-   * or the Anthropic Messages API (`messages`).
+   * Optional per-model upstream API overrides. Keys are upstream model ids
+   * (without the `${providerId}/` prefix). The protocol is normally read from
+   * the provider's `/models` entry (`api.chat-completions`,
+   * `api.responses`, `api.messages`); this map is only for providers whose
+   * model metadata does not describe the endpoint.
    */
   modelApis?: Record<string, 'chat' | 'responses' | 'messages'>;
   /** Header used to send the stable conversation/session id, e.g. "x-opencode-session" */

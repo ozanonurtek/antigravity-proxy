@@ -13,28 +13,63 @@ export interface ResolvedProvider {
   upstreamModel: string;
 }
 
-export const providerModelsCache = new Map<string, string[]>();
+/**
+ * Full model objects returned by each provider's `/models` endpoint. Upstreams
+ * such as OpenCode Zen/Go publish capabilities, modalities, limits and pricing
+ * on these objects, so they are cached and mirrored verbatim.
+ */
+export const providerModelsCache = new Map<string, Array<Record<string, any>>>();
 
 const DEFAULT_CHAT_PATH = "chat/completions";
 const DEFAULT_RESPONSES_PATH = "responses";
 const DEFAULT_MESSAGES_PATH = "messages";
 const DEFAULT_MODELS_PATH = "models";
 
+/** Upstream `api` object keys mapped to the protocol the proxy speaks. */
+const API_KEY_MAP: Record<string, UpstreamApi> = {
+  "chat-completions": "chat",
+  "responses": "responses",
+  "messages": "messages",
+  "generate-content": "google",
+};
+
 /**
- * Determine which upstream protocol a model is served on. Defaults to the
- * OpenAI Chat Completions API, with per-model overrides from the provider
- * config (see `modelApis`).
+ * Read the protocol a model is served on from its upstream `/models` entry.
+ * Providers such as OpenCode Zen/Go publish an `api` object with exactly one
+ * key per model (`chat-completions`, `responses` or `messages`).
+ */
+export function upstreamApiFromModel(model: Record<string, any> | undefined): UpstreamApi | null {
+  const api = model?.api;
+  if (!api || typeof api !== "object") return null;
+  for (const [key, upstreamApi] of Object.entries(API_KEY_MAP)) {
+    if (api[key]) return upstreamApi;
+  }
+  return null;
+}
+
+/**
+ * Determine which upstream protocol a model is served on, using the discovered
+ * model metadata first. `modelApis` remains available only as an explicit
+ * override for providers that do not publish an `api` description.
  */
 export function resolveUpstreamApi(provider: ProviderConfig, upstreamModel: string): UpstreamApi {
   const override = provider.modelApis?.[upstreamModel];
   if (override === "responses" || override === "messages" || override === "chat") return override;
-  return "chat";
+
+  const model = (providerModelsCache.get(provider.id) || []).find(m => m.id === upstreamModel);
+  return upstreamApiFromModel(model) || "chat";
 }
 
 function upstreamPath(provider: ProviderConfig, api: UpstreamApi): string {
   if (api === "responses") return provider.responsesPath || DEFAULT_RESPONSES_PATH;
   if (api === "messages") return provider.messagesPath || DEFAULT_MESSAGES_PATH;
   return provider.chatPath || DEFAULT_CHAT_PATH;
+}
+
+/** Google GenAI exposes methods on the model resource instead of a path. */
+function googleTargetUrl(baseUrl: string, model: string, stream: boolean): string {
+  const method = stream ? "streamGenerateContent?alt=sse" : "generateContent";
+  return `${baseUrl}/models/${encodeURIComponent(model)}:${method}`;
 }
 
 function providerBaseUrl(provider: ProviderConfig): string {
@@ -72,18 +107,31 @@ export function resolveProvider(modelId: string): ResolvedProvider | null {
   return matchProvider(modelId, getProviders());
 }
 
-export function listProviderModels(): Array<{ id: string; owned_by: string }> {
-  const models: Array<{ id: string; owned_by: string }> = [];
+/**
+ * Prefix a provider's model object for the proxy namespace while preserving
+ * every capability/limit/pricing field the upstream published.
+ */
+export function prefixProviderModel(providerId: string, model: Record<string, any>): Record<string, any> {
+  return {
+    ...model,
+    id: `${providerId}/${model.id}`,
+    object: model.object || "model",
+    owned_by: model.owned_by || providerId,
+  };
+}
+
+export function listProviderModels(): Array<Record<string, any>> {
+  const models: Array<Record<string, any>> = [];
   for (const provider of getProviders()) {
     for (const model of providerModelsCache.get(provider.id) || []) {
-      models.push({ id: `${provider.id}/${model}`, owned_by: provider.id });
+      models.push(prefixProviderModel(provider.id, model));
     }
   }
   return models;
 }
 
 export function listProviderModelIds(): string[] {
-  return listProviderModels().map(m => m.id);
+  return listProviderModels().map(m => String(m.id));
 }
 
 export async function refreshProviderModels(): Promise<void> {
@@ -99,12 +147,13 @@ export async function refreshProviderModels(): Promise<void> {
         continue;
       }
       const data = await res.json() as any;
-      const ids = (data?.data || [])
-        .map((m: any) => m?.id)
-        .filter((id: any): id is string => typeof id === "string" && id.length > 0);
-      if (ids.length > 0) {
-        providerModelsCache.set(provider.id, ids);
-        console.log(`[Provider] Loaded ${ids.length} models from ${provider.name || provider.id}`);
+      const payload = Array.isArray(data) ? data : (data?.data || []);
+      const models = payload.filter(
+        (m: any): m is Record<string, any> => !!m && typeof m === "object" && typeof m.id === "string" && m.id.length > 0
+      );
+      if (models.length > 0) {
+        providerModelsCache.set(provider.id, models);
+        console.log(`[Provider] Loaded ${models.length} models from ${provider.name || provider.id}`);
       }
     } catch (e: any) {
       console.warn(`[Provider] Failed to refresh models for ${provider.id}: ${e?.message || e}`);
@@ -135,6 +184,9 @@ export function buildUpstreamHeaders(
       // Anthropic-style endpoints authenticate with x-api-key, not Bearer.
       headers["x-api-key"] = key;
       headers["anthropic-version"] = "2023-06-01";
+    } else if (api === "google") {
+      // Google GenAI endpoints authenticate with x-goog-api-key.
+      headers["x-goog-api-key"] = key;
     } else {
       headers["Authorization"] = `Bearer ${key}`;
     }
@@ -164,8 +216,10 @@ export async function proxyProviderRequest(
   const { provider, upstreamModel } = resolved;
   const baseUrl = providerBaseUrl(provider);
   const api = resolveUpstreamApi(provider, upstreamModel);
-  const targetUrl = `${baseUrl}/${upstreamPath(provider, api)}`;
   const isStream = openaiBody.stream === true;
+  const targetUrl = api === "google"
+    ? googleTargetUrl(baseUrl, upstreamModel, isStream)
+    : `${baseUrl}/${upstreamPath(provider, api)}`;
   const requestId = "chatcmpl-" + Math.random().toString(36).substring(7);
 
   const baseBody = { ...openaiBody, model: upstreamModel };
