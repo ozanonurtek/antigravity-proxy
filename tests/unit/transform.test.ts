@@ -27,6 +27,44 @@ describe("Unit Tests: transformToGoogleBody", () => {
     expect(result.request.generationConfig.temperature).toBe(0.5);
   });
 
+  test("Maps OpenAI file parts to Gemini inline data", () => {
+    const openaiBody = {
+      model: "gemini-3-flash",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "file", file: { filename: "spec.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQ=" } },
+          { type: "text", text: "Summarize this" }
+        ]
+      }]
+    };
+
+    const result = transformToGoogleBody(openaiBody, "p", false, "us-central1");
+
+    expect(result.request.contents[0].parts).toEqual([
+      { inlineData: { mimeType: "application/pdf", data: "JVBERi0xLjQ=" } },
+      { text: "Summarize this" }
+    ]);
+  });
+
+  test("Maps a file-only message to Gemini inline data", () => {
+    const openaiBody = {
+      model: "gemini-3-flash",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "file", file: { filename: "spec.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQ=" } }
+        ]
+      }]
+    };
+
+    const result = transformToGoogleBody(openaiBody, "p", false, "us-central1");
+
+    expect(result.request.contents[0].parts).toEqual([
+      { inlineData: { mimeType: "application/pdf", data: "JVBERi0xLjQ=" } }
+    ]);
+  });
+
   test("Antigravity model prefix removal", () => {
     const openaiBody = {
       model: "antigravity-gemini-2.0-flash",
