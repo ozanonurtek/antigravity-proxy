@@ -121,6 +121,94 @@ function deriveInputModalities(raw: Record<string, any>): string[] {
   return Array.from(input);
 }
 
+function modalityFamily(modality: string): string | null {
+  const lower = modality.toLowerCase();
+  if (lower === "text" || lower.startsWith("text/")) return "text";
+  if (lower === "image" || lower.startsWith("image/")) return "image";
+  if (lower === "audio" || lower.startsWith("audio/")) return "audio";
+  if (lower === "video" || lower.startsWith("video/")) return "video";
+  if (lower === "file" || lower === "files" || lower.startsWith("application/")) return "file";
+  return null;
+}
+
+function modalityFamilies(modalities: unknown): string[] {
+  if (!Array.isArray(modalities)) return [];
+  const families = new Set<string>();
+  for (const modality of modalities) {
+    if (typeof modality !== "string") continue;
+    const family = modalityFamily(modality);
+    if (family) families.add(family);
+  }
+  return Array.from(families);
+}
+
+/**
+ * Add the OpenRouter/models.dev-style aliases many clients use to read
+ * capabilities from `/v1/models` (`architecture`, `supported_parameters`,
+ * `reasoning`). All values are derived from the mirrored source metadata.
+ */
+export function withModelCapabilityAliases(model: Record<string, any>): Record<string, any> {
+  const out = { ...model };
+  const capabilities = model.capabilities && typeof model.capabilities === "object" ? model.capabilities : {};
+
+  const reasoning = capabilities.reasoning;
+  const reasoningSupported = typeof reasoning === "boolean"
+    ? reasoning
+    : typeof reasoning?.supported === "boolean"
+      ? reasoning.supported
+      : undefined;
+  const tools = capabilities.tools;
+  const toolsSupported = typeof tools === "boolean"
+    ? tools
+    : typeof tools?.supported === "boolean"
+      ? tools.supported
+      : undefined;
+  const efforts = Array.isArray(reasoning?.effort)
+    ? reasoning.effort.filter((effort: unknown): effort is string => typeof effort === "string")
+    : [];
+
+  const inputFamilies = modalityFamilies(model.modalities?.input);
+  const outputFamilies = modalityFamilies(model.modalities?.output);
+  if (inputFamilies.length === 0) inputFamilies.push("text");
+  if (outputFamilies.length === 0) outputFamilies.push("text");
+
+  if (out.architecture === undefined) {
+    out.architecture = {
+      input_modalities: inputFamilies,
+      output_modalities: outputFamilies,
+    };
+  }
+
+  if (out.reasoning === undefined && reasoningSupported !== undefined) {
+    out.reasoning = {
+      supported_efforts: efforts,
+      default_enabled: reasoningSupported,
+      mandatory: reasoningSupported && !reasoning?.toggle && !efforts.includes("none"),
+      supports_max_tokens: false,
+    };
+  }
+
+  if (out.supported_parameters === undefined) {
+    const parameters = new Set<string>();
+    if (toolsSupported) {
+      parameters.add("tools");
+      parameters.add("tool_choice");
+    }
+    if (reasoningSupported) {
+      parameters.add("reasoning");
+      parameters.add("include_reasoning");
+      if (efforts.length > 0) parameters.add("reasoning_effort");
+    }
+    if (capabilities.temperature !== false) parameters.add("temperature");
+    if (capabilities.top_p !== false) parameters.add("top_p");
+    if (capabilities.top_k !== false) parameters.add("top_k");
+    if (capabilities.structured_output) parameters.add("response_format");
+    out.supported_parameters = Array.from(parameters);
+  }
+
+  return out;
+}
+
 /**
  * Build the OpenAI model object for a native (Cloud Code) model from the
  * metadata the upstream returned. Unknown models fall back to a minimal entry.
@@ -176,5 +264,5 @@ export function buildNativeModelObject(id: string): Record<string, any> {
     if (raw[field] !== undefined) model[field] = raw[field];
   }
 
-  return model;
+  return withModelCapabilityAliases(model);
 }

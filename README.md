@@ -152,6 +152,8 @@ The gateway can also proxy to external OpenAI-compatible providers. Requests for
 
 Both providers share the same key, configured via `OPENCODE_API_KEY` (or per-provider `apiKey` in `config.json`). Provider models (including the free Zen models) are discovered from each provider's `/models` endpoint and listed under `/v1/models`, keeping the upstream capability metadata (`modalities`, `capabilities`, `limit`, pricing, etc.) intact. Native Antigravity models are enriched from the live `fetchAvailableModels` catalog the same way, so `/v1/models` reflects what each model can actually accept (images, video, thinking, context limits).
 
+For clients that read OpenRouter-style model metadata, every entry also exposes derived `/v1/models` aliases: `architecture.input_modalities` / `output_modalities`, `supported_parameters` (including `tools`, `reasoning` and `reasoning_effort`), and a `reasoning` object with `supported_efforts`. These are computed from the mirrored upstream capabilities, not hardcoded per model.
+
 Models are automatically routed to the correct upstream protocol using the `api` metadata published by the provider's `/models` endpoint. Many models are **not** served on the OpenAI Chat Completions endpoint:
 
 | Upstream API | Endpoint | Example models |

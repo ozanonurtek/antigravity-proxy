@@ -1,5 +1,6 @@
 import { getProxyConfig } from "../config/manager";
 import { type ProviderConfig } from "../config/types";
+import { withModelCapabilityAliases } from "../utils/model-registry";
 import {
   type UpstreamApi,
   translateRequestToUpstream,
@@ -112,12 +113,12 @@ export function resolveProvider(modelId: string): ResolvedProvider | null {
  * every capability/limit/pricing field the upstream published.
  */
 export function prefixProviderModel(providerId: string, model: Record<string, any>): Record<string, any> {
-  return {
+  return withModelCapabilityAliases({
     ...model,
     id: `${providerId}/${model.id}`,
     object: model.object || "model",
     owned_by: model.owned_by || providerId,
-  };
+  });
 }
 
 export function listProviderModels(): Array<Record<string, any>> {
