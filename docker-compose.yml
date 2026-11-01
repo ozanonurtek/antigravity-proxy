@@ -3,7 +3,10 @@ name: agyproxy
 services:
   proxy:
     build: .
-    image: antigravity-proxy:local
+    # Local build tag by default. Point AGY_IMAGE at the published multi-arch
+    # image (ghcr.io/ozanonurtek/antigravity-proxy:latest) to pull instead of
+    # building on the host.
+    image: ${AGY_IMAGE:-antigravity-proxy:local}
     container_name: antigravity-proxy
     restart: unless-stopped
     env_file:

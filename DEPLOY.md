@@ -40,6 +40,10 @@ up; it is the only thing that must survive a redeploy.
 
 ## 3. Build & run
 
+Two options: build on the host (default) or pull the CI-built multi-arch image.
+
+**Local build** — the image is built natively (amd64 or arm64), no emulation:
+
 ```bash
 cd /opt/agyproxy
 sudo docker compose build
@@ -48,11 +52,21 @@ sudo docker compose ps
 sudo docker compose logs -f proxy
 ```
 
-Update after a `git pull`:
+**Pull the published image** — the Build workflow pushes
+`ghcr.io/ozanonurtek/antigravity-proxy` with a multi-arch manifest:
 
 ```bash
-sudo docker compose build --pull
+cd /opt/agyproxy
+echo 'AGY_IMAGE=ghcr.io/ozanonurtek/antigravity-proxy:latest' >> .env
+sudo docker compose pull
 sudo docker compose up -d
+```
+
+Update after a `git pull` (local build) or a new `:latest` (registry):
+
+```bash
+sudo docker compose build --pull && sudo docker compose up -d   # local build
+sudo docker compose pull && sudo docker compose up -d           # registry
 ```
 
 ## 4. Cloudflare Tunnel
