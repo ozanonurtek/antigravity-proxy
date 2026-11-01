@@ -1,15 +1,27 @@
+name: agyproxy
+
 services:
   proxy:
     build: .
+    # Local build tag by default. Point AGY_IMAGE at the published multi-arch
+    # image (ghcr.io/ozanonurtek/antigravity-proxy:latest) to pull instead of
+    # building on the host.
+    image: ${AGY_IMAGE:-antigravity-proxy:local}
     container_name: antigravity-proxy
-    ports:
-      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
     env_file:
       - .env
     environment:
       - ACCOUNTS_FILE=/app/data/antigravity-accounts.json
       - CONFIG_FILE=/app/data/config.json
+      # Public origin, used for links/OAuth redirects. Must match the hostname
+      # the Cloudflare Tunnel publishes.
       - BASE_URL=${BASE_URL:-http://127.0.0.1:3000}
     volumes:
+      # Accounts + config live here; this is the only stateful directory.
       - ./data:/app/data:z
-    restart: unless-stopped
+    ports:
+      # Localhost only. Public traffic goes through the Cloudflare Tunnel
+      # connector, which reaches this container over `agyproxy_default` as
+      # http://proxy:3000. Remove this mapping if you do not need local access.
+      - "127.0.0.1:3000:3000"
