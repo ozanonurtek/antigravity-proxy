@@ -31,6 +31,19 @@ bunx antigravity-proxy@0.7.0
 docker run -d -p 3000:3000 -e BASE_URL=http://localhost:3000 --name antigravity-proxy ozanonurtek/antigravity-proxy:0.8.0
 ```
 
+### Docker Compose (self-hosted, production)
+The bundled [`docker-compose.yml`](docker-compose.yml) runs the proxy with
+persistent state in `./data` and a localhost-only port. Public access is meant
+to sit behind a Cloudflare Tunnel (or any reverse proxy).
+
+```bash
+cp .env.example .env      # set BASE_URL, API_KEY, WEB_PASSWORD
+docker compose up -d --build
+```
+
+See **[DEPLOY.md](DEPLOY.md)** for the full production guide (host layout,
+tunnel routes, backups, troubleshooting).
+
 ### Local Execution (Bun)
 Requirements: Bun (v1.0.0 or higher).
 ```bash
