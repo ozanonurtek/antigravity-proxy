@@ -42,6 +42,7 @@ const DEFAULT_CONFIG: ProxyConfig = {
   },
   models: {
     blacklist: [],
+    allowlist: [],
     routing: {
       sandboxKeywords: ['gpt', 'antigravity', 'image'],
       cliKeywords: ['claude', 'gemini-2.0', 'gemini-2.5', '-preview'],

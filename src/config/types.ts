@@ -94,6 +94,7 @@ export interface ScoringConfig {
 
 export interface ModelsConfig {
   blacklist: string[];
+  allowlist: string[];
   routing: {
     sandboxKeywords: string[];
     cliKeywords: string[];

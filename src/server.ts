@@ -183,13 +183,34 @@ Bun.serve({
     }
 
     if (cleanPath === "/v1/models") {
+        const cfg = getProxyConfig();
+        const allow = (cfg.models.allowlist || []).map((x: string) => x.toLowerCase());
+        const deny = new Set((cfg.models.blacklist || []).map((x: string) => x.toLowerCase()));
+        const visible = (id: string) => {
+            const key = String(id).toLowerCase();
+            if (deny.has(key)) return false;
+            return allow.length === 0 || allow.includes(key);
+        };
+
         const models = Array.from(supportedModelsCache)
+            .filter(id => visible(id))
             .sort()
             .map(id => buildNativeModelObject(id));
 
         // Provider entries are mirrored from the upstream `/models` payload so
         // capabilities, modalities, limits and pricing stay accurate.
-        models.push(...listProviderModels());
+        models.push(...listProviderModels().filter(m => visible(String(m.id))));
+
+        // With an allowlist configured, expose every allowed model even if the
+        // upstream catalog has not (yet) reported it.
+        if (allow.length > 0) {
+            const present = new Set(models.map(m => String(m.id).toLowerCase()));
+            for (const id of allow) {
+                if (!present.has(id)) {
+                    models.push({ id, object: "model", created: Math.floor(Date.now() / 1000), owned_by: "antigravity", name: id });
+                }
+            }
+        }
 
         return new Response(JSON.stringify({
             object: "list",
@@ -205,8 +226,18 @@ Bun.serve({
 
     if (cleanPath.startsWith("/v1/models/") && req.method === "GET") {
         const modelId = cleanPath.slice("/v1/models/".length);
-        const model = listProviderModels().find(m => m.id === modelId)
-            || (supportedModelsCache.has(modelId) ? buildNativeModelObject(modelId) : null);
+        const cfg = getProxyConfig();
+        const allow = (cfg.models.allowlist || []).map((x: string) => x.toLowerCase());
+        const deny = new Set((cfg.models.blacklist || []).map((x: string) => x.toLowerCase()));
+        const key = modelId.toLowerCase();
+        const visible = !deny.has(key) && (allow.length === 0 || allow.includes(key));
+
+        const model = !visible
+            ? null
+            : (listProviderModels().find(m => m.id === modelId)
+                || (supportedModelsCache.has(modelId)
+                    ? buildNativeModelObject(modelId)
+                    : { id: modelId, object: "model", created: Math.floor(Date.now() / 1000), owned_by: "antigravity", name: modelId }));
 
         if (!model) {
             return new Response(JSON.stringify({
