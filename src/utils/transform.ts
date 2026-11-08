@@ -96,6 +96,10 @@ function resolveModelId(modelId: string): string {
         }
     }
 
+    // Convenience aliases: the CLI catalog uses explicit effort tiers.
+    if (/^gemini-\d+(\.\d+)?-(flash|pro)$/.test(cleanId)) return `${cleanId}-high`;
+    if (cleanId === "gpt-oss-120b") return "gpt-oss-120b-medium";
+
     return cleanId;
 }
 
@@ -128,8 +132,12 @@ export function transformToGoogleBody(
       baseModel = baseModel.replace(previewMatch[0], "");
   }
 
+  // When impersonating the CLI, the official catalog IDs are sent verbatim:
+  // gemini-3.8-flash-high, claude-sonnet-4-6, gpt-oss-120b-medium, ...
+  const cliMode = process.env.ANTIGRAVITY_CLI_MODE !== "false";
+
   // Force Claude model IDs to strip tier for the backend
-        if (googleModel.includes("claude")) {
+        if (!cliMode && googleModel.includes("claude")) {
             googleModel = baseModel;
             if (googleModel === "claude-opus-4-6") googleModel = "claude-opus-4-6-thinking";
             if (googleModel === "claude-sonnet-4-6") googleModel = "claude-sonnet-4-6-thinking";
@@ -138,7 +146,9 @@ export function transformToGoogleBody(
 
     const isNative = isCataloguedModel(googleModel, baseModel);
 
-  if (isCli) {
+  if (cliMode) {
+      googleModel = resolvedModel;
+  } else if (isCli) {
       if (!googleModel.includes("claude")) {
           // Standardize Gemini 3+ CLI models to use -preview suffix
           if (isGemini3OrNewer(googleModel)) {

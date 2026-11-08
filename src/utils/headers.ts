@@ -41,6 +41,12 @@ export const OAUTH_CONFIG = {
 
 const ANTIGRAVITY_VERSION = "2.0.1";
 
+// The official Antigravity CLI identifies itself differently from the desktop
+// app. Google rejects the desktop-style fingerprint with "This version of
+// Antigravity is no longer supported", so we impersonate the CLI instead.
+const CLI_VERSION = process.env.ANTIGRAVITY_CLI_VERSION || "1.5.3";
+const CLI_USER_AGENT = `antigravity/cli/${CLI_VERSION} (aidev_client; os_type=darwin; arch=arm64; cl=1016078699; auth_method=consumer)`;
+
 const PLATFORMS = ["darwin/x64", "darwin/arm64"] as const;
 
 const ARCHITECTURES = ["x64", "arm64"] as const;
@@ -142,7 +148,7 @@ export function getImpersonationHeaders(accessToken: string, fingerprint?: Devic
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${accessToken}`,
     "Content-Type": "application/json",
-    "User-Agent": `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
+    "User-Agent": CLI_USER_AGENT,
     "X-Goog-Api-Client": fp.apiClient,
     "X-Goog-QuotaUser": fp.quotaUser,
     "X-Client-Device-Id": fp.deviceId,
@@ -168,7 +174,7 @@ export function getGeminiCliHeaders(accessToken: string, fingerprint?: DeviceFin
   const fp = fingerprint || generateFingerprint();
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${accessToken}`,
-    "User-Agent": fp.cliUserAgent,
+    "User-Agent": CLI_USER_AGENT,
     "X-Goog-Api-Client": fp.cliApiClient,
     "X-Goog-QuotaUser": fp.quotaUser,
     "X-Client-Device-Id": fp.deviceId,
